@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { NewsItem, NicheKey } from '@/lib/news';
 import { NICHE_LABELS } from '@/lib/news';
 
@@ -37,8 +37,30 @@ function hostFromUrl(url: string | null): string | null {
   }
 }
 
-export default function NewsFeed({ items }: { items: NewsItem[] }) {
+export default function NewsFeed() {
+  const [items, setItems] = useState<NewsItem[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/news');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      setItems(data.items ?? []);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
 
   const visible =
     filter === 'all' ? items : items.filter((i) => i.niche === filter);
@@ -47,7 +69,13 @@ export default function NewsFeed({ items }: { items: NewsItem[] }) {
     <div className="border border-[var(--border)] bg-[var(--surface)]">
       <div className="px-4 py-2 border-b border-[var(--border)] flex items-center justify-between gap-2">
         <h2 className="text-sm font-semibold">Noticias del nicho</h2>
-        <span className="mono text-[10px] text-[var(--muted)]">HN</span>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="mono text-[10px] text-[var(--accent)] hover:underline disabled:opacity-50"
+        >
+          {loading ? '…' : '↻ HN'}
+        </button>
       </div>
 
       <nav className="flex flex-wrap gap-1 px-2 py-2 border-b border-[var(--border)]">
@@ -67,8 +95,18 @@ export default function NewsFeed({ items }: { items: NewsItem[] }) {
       </nav>
 
       <div className="p-2 space-y-1 max-h-[420px] overflow-auto">
-        {visible.length === 0 && (
-          <p className="text-sm text-[var(--muted)] p-2">Sin noticias para este filtro.</p>
+        {loading && (
+          <p className="text-xs mono text-[var(--muted)] p-2">cargando…</p>
+        )}
+        {error && (
+          <p className="text-xs mono text-[var(--danger)] p-2">
+            Error: {error}
+          </p>
+        )}
+        {!loading && !error && visible.length === 0 && (
+          <p className="text-sm text-[var(--muted)] p-2">
+            Sin noticias para este filtro.
+          </p>
         )}
         {visible.map((it) => {
           const host = hostFromUrl(it.url);

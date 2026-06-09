@@ -4,21 +4,16 @@ import TaskBoard from '@/components/TaskBoard';
 import DailySummary from '@/components/DailySummary';
 import GitHubActivity from '@/components/GitHubActivity';
 import NewsFeed from '@/components/NewsFeed';
-import { fetchNews } from '@/lib/news';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
   const day = new Date().toISOString().slice(0, 10);
 
-  const [tasksRows, activity, summaryRows, news] = await Promise.all([
+  const [tasksRows, activity, summaryRows] = await Promise.all([
     db.select().from(tasks).orderBy(sql`${tasks.due_date} ASC NULLS LAST`),
     db.select().from(github_activity).where(eq(github_activity.day, day)),
     db.select().from(daily_summaries).where(eq(daily_summaries.day, day)).limit(1),
-    fetchNews().catch((e) => {
-      console.error('[page] fetchNews failed:', e);
-      return [];
-    }),
   ]);
 
   const summary = summaryRows[0] ?? null;
@@ -38,7 +33,7 @@ export default async function Page() {
         </div>
         <div className="space-y-4 sm:space-y-6">
           <DailySummary initial={summary} />
-          <NewsFeed items={news} />
+          <NewsFeed />
           <GitHubActivity items={activity} />
         </div>
       </div>
