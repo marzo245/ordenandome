@@ -15,6 +15,7 @@ import {
 import type { Task, TaskPriority, TaskStatus } from '@/lib/types';
 import TaskPlannerModal from './TaskPlannerModal';
 import TaskDetailModal from './TaskDetailModal';
+import TaskCalendar from './TaskCalendar';
 
 const STATUSES: { key: TaskStatus; label: string }[] = [
   { key: 'todo', label: 'Por hacer' },
@@ -36,6 +37,7 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [view, setView] = useState<'board' | 'calendar'>('board');
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
@@ -139,23 +141,50 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
         onCreated={(task) => setTasks((t) => [task, ...t])}
       />
 
-      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className="grid grid-cols-3 gap-4">
-          {STATUSES.map((col) => (
-            <Column
-              key={col.key}
-              status={col.key}
-              label={col.label}
-              tasks={tasks.filter((t) => t.status === col.key)}
-              onRemove={remove}
-              onSelect={setSelectedTask}
-            />
-          ))}
-        </div>
-        <DragOverlay>
-          {activeTask ? <Card task={activeTask} dragging /> : null}
-        </DragOverlay>
-      </DndContext>
+      <nav className="flex gap-1 mb-4 border-b border-[var(--border)]">
+        <button
+          onClick={() => setView('board')}
+          className={`px-4 py-2 text-sm -mb-px border-b-2 ${
+            view === 'board'
+              ? 'border-[var(--accent)] text-[var(--accent)]'
+              : 'border-transparent text-[var(--muted)] hover:text-white'
+          }`}
+        >
+          Tablero
+        </button>
+        <button
+          onClick={() => setView('calendar')}
+          className={`px-4 py-2 text-sm -mb-px border-b-2 ${
+            view === 'calendar'
+              ? 'border-[var(--accent)] text-[var(--accent)]'
+              : 'border-transparent text-[var(--muted)] hover:text-white'
+          }`}
+        >
+          Calendario
+        </button>
+      </nav>
+
+      {view === 'board' ? (
+        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+          <div className="grid grid-cols-3 gap-4">
+            {STATUSES.map((col) => (
+              <Column
+                key={col.key}
+                status={col.key}
+                label={col.label}
+                tasks={tasks.filter((t) => t.status === col.key)}
+                onRemove={remove}
+                onSelect={setSelectedTask}
+              />
+            ))}
+          </div>
+          <DragOverlay>
+            {activeTask ? <Card task={activeTask} dragging /> : null}
+          </DragOverlay>
+        </DndContext>
+      ) : (
+        <TaskCalendar tasks={tasks} onSelect={setSelectedTask} />
+      )}
 
       <TaskDetailModal
         task={selectedTask}
