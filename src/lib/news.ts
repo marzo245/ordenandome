@@ -56,7 +56,10 @@ async function fetchNiche(n: Niche, perNiche: number): Promise<NewsItem[]> {
   )}&tags=story&hitsPerPage=${perNiche}&numericFilters=points>15`;
 
   const res = await fetch(url, { next: { revalidate: 600 } });
-  if (!res.ok) return [];
+  if (!res.ok) {
+    console.warn(`[news] ${n.key} HTTP ${res.status}`);
+    return [];
+  }
   const data = (await res.json()) as { hits: HnHit[] };
 
   return data.hits

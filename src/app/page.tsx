@@ -15,7 +15,10 @@ export default async function Page() {
     db.select().from(tasks).orderBy(sql`${tasks.due_date} ASC NULLS LAST`),
     db.select().from(github_activity).where(eq(github_activity.day, day)),
     db.select().from(daily_summaries).where(eq(daily_summaries.day, day)).limit(1),
-    fetchNews().catch(() => []),
+    fetchNews().catch((e) => {
+      console.error('[page] fetchNews failed:', e);
+      return [];
+    }),
   ]);
 
   const summary = summaryRows[0] ?? null;
