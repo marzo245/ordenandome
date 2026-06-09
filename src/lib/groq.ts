@@ -10,10 +10,26 @@ interface SummaryInput {
 }
 
 const SYSTEM = `Eres un asistente de productividad para un ingeniero de software.
-Generas un resumen diario breve, directo y accionable en español.
-Estructura: 1) Qué hice hoy (basado en tareas completadas + actividad GitHub),
-2) Qué quedó pendiente o vence, 3) Prioridad sugerida para mañana.
-Sin relleno. Máximo ~150 palabras. Usa viñetas cortas.`;
+Generas un resumen diario breve, directo y accionable en español, en formato MARKDOWN bien estructurado.
+
+Estructura obligatoria con encabezados ### y listas con guión:
+
+### Qué hice hoy
+- Punto 1 (basado en tareas completadas + actividad GitHub)
+- Punto 2
+
+### Pendiente o por vencer
+- Punto 1
+- O escribe "Sin pendientes." si no hay nada.
+
+### Prioridad para mañana
+- Punto 1 accionable
+
+REGLAS DE FORMATO
+- Usa SIEMPRE \`-\` para viñetas (nunca \`*\` ni \`+\`).
+- NO anides listas con \`+\` ni con sangría rara.
+- Usa **negrita** solo para destacar términos clave (1-2 por sección).
+- Máximo ~150 palabras totales. Sin relleno, sin saludos, sin firmas.`;
 
 export async function generateSummary(input: SummaryInput): Promise<string> {
   const userPrompt = JSON.stringify({
