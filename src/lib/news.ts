@@ -88,7 +88,32 @@ async function fetchNiche(n: Niche, perNiche: number): Promise<NewsItem[]> {
 }
 
 export async function fetchNews(perNiche = 6): Promise<NewsItem[]> {
-  const results = await Promise.all(NICHES.map((n) => fetchNiche(n, perNiche)));
+  const result = await fetchNewsWithDebug(perNiche);
+  return result.items;
+}
+
+export interface NewsDebug {
+  items: NewsItem[];
+  perNiche: Record<NicheKey, number>;
+  errors: { niche: NicheKey; error: string }[];
+}
+
+export async function fetchNewsWithDebug(perNiche = 6): Promise<NewsDebug> {
+  const errors: { niche: NicheKey; error: string }[] = [];
+  const perNicheCount: Record<NicheKey, number> = { dev: 0, ai: 0, sec: 0, startup: 0 };
+
+  const results = await Promise.all(
+    NICHES.map(async (n) => {
+      try {
+        const items = await fetchNiche(n, perNiche);
+        perNicheCount[n.key] = items.length;
+        return items;
+      } catch (e) {
+        errors.push({ niche: n.key, error: (e as Error).message });
+        return [];
+      }
+    })
+  );
   const all = results.flat();
 
   const seen = new Set<string>();
@@ -100,7 +125,7 @@ export async function fetchNews(perNiche = 6): Promise<NewsItem[]> {
   }
 
   dedup.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
-  return dedup;
+  return { items: dedup, perNiche: perNicheCount, errors };
 }
 
 export const NICHE_KEYS: NicheKey[] = NICHES.map((n) => n.key);
