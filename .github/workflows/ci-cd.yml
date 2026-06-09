@@ -1,0 +1,48 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancela runs viejos del mismo branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Lint · Typecheck · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+        env:
+          # El build no llama a las APIs (la pagina es force-dynamic),
+          # pero el cliente de Supabase se inicializa al importar -> placeholders.
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: placeholder
+
+  deploy:
+    name: Deploy a Render
+    needs: ci
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Deploy Hook
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"

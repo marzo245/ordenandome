@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0e12;
+  --surface: #11171d;
+  --border: #1f2933;
+  --text: #e4e9ed;
+  --muted: #8a97a3;
+  --accent: #1d9e75;
+  --accent-dim: #15795a;
+  --danger: #c0392b;
+  --warn: #d98c1f;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-plex-sans), system-ui, sans-serif;
+}
+
+code, .mono { font-family: var(--font-plex-mono), monospace; }
+
+::selection { background: var(--accent); color: #fff; }
