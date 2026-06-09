@@ -6,7 +6,7 @@ services:
     runtime: node
     plan: free
     branch: main
-    autoDeploy: false            # GitHub Actions dispara el deploy via hook
+    autoDeploy: true             # Render despliega automáticamente en cada push a main
     buildCommand: npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /
