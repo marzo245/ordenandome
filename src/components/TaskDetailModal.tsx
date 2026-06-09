@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Task, TaskPriority } from '@/lib/types';
+import TaskChat from './TaskChat';
 
 interface Props {
   task: Task | null;
@@ -18,6 +19,7 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
   const [tags, setTags] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<'detail' | 'chat'>('detail');
 
   useEffect(() => {
     if (!task) return;
@@ -27,6 +29,7 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
     setDueDate(task.due_date ?? '');
     setTags((task.tags ?? []).join(', '));
     setError(null);
+    setTab('detail');
   }, [task]);
 
   if (!task) return null;
@@ -96,7 +99,31 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-          <h2 className="font-semibold">Detalle de tarea</h2>
+          <div className="flex items-center gap-4">
+            <h2 className="font-semibold">Tarea</h2>
+            <nav className="flex gap-1 text-sm">
+              <button
+                onClick={() => setTab('detail')}
+                className={`px-3 py-1 ${
+                  tab === 'detail'
+                    ? 'border-b-2 border-[var(--accent)] text-[var(--accent)]'
+                    : 'text-[var(--muted)] hover:text-white'
+                }`}
+              >
+                Detalle
+              </button>
+              <button
+                onClick={() => setTab('chat')}
+                className={`px-3 py-1 ${
+                  tab === 'chat'
+                    ? 'border-b-2 border-[var(--accent)] text-[var(--accent)]'
+                    : 'text-[var(--muted)] hover:text-white'
+                }`}
+              >
+                💡 Chat
+              </button>
+            </nav>
+          </div>
           <button
             onClick={onClose}
             className="text-[var(--muted)] hover:text-[var(--danger)] text-xl leading-none"
@@ -105,6 +132,10 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
           </button>
         </header>
 
+        {tab === 'chat' ? (
+          <TaskChat taskId={task.id} />
+        ) : (
+        <>
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           <div>
             <label className="text-xs mono text-[var(--muted)]">Título</label>
@@ -196,6 +227,8 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
             </button>
           </div>
         </footer>
+        </>
+        )}
       </div>
     </div>
   );

@@ -35,6 +35,20 @@ export const github_activity = pgTable(
   ]
 );
 
+export const task_messages = pgTable(
+  'task_messages',
+  {
+    id: uuid().primaryKey().default(sql`gen_random_uuid()`),
+    task_id: uuid().notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+    role: text({ enum: ['user', 'assistant'] }).notNull(),
+    content: text().notNull(),
+    created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('idx_task_messages_task').on(t.task_id, t.created_at)]
+);
+
+export type TaskMessage = typeof task_messages.$inferSelect;
+
 export const daily_summaries = pgTable('daily_summaries', {
   id: uuid().primaryKey().default(sql`gen_random_uuid()`),
   day: date().notNull().unique(),
