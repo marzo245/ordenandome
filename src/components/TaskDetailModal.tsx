@@ -16,6 +16,7 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('media');
   const [dueDate, setDueDate] = useState('');
+  const [deadline, setDeadline] = useState('');
   const [tags, setTags] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +28,7 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
     setDescription(task.description ?? '');
     setPriority(task.priority);
     setDueDate(task.due_date ?? '');
+    setDeadline(task.deadline ?? '');
     setTags((task.tags ?? []).join(', '));
     setError(null);
     setTab('detail');
@@ -39,7 +41,13 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
     description !== (task.description ?? '') ||
     priority !== task.priority ||
     dueDate !== (task.due_date ?? '') ||
+    deadline !== (task.deadline ?? '') ||
     tags !== (task.tags ?? []).join(', ');
+
+  const deadlineBeforeDue =
+    dueDate && deadline && deadline < dueDate
+      ? 'La fecha límite es anterior a la fecha programada.'
+      : null;
 
   async function save() {
     if (!task) return;
@@ -54,6 +62,7 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
           description: description.trim() || null,
           priority,
           due_date: dueDate || null,
+          deadline: deadline || null,
           tags: tags
             .split(',')
             .map((t) => t.trim())
@@ -170,7 +179,7 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
               </select>
             </div>
             <div>
-              <label className="text-xs mono text-[var(--muted)]">Vence</label>
+              <label className="text-xs mono text-[var(--muted)]">Programada para</label>
               <input
                 type="date"
                 value={dueDate}
@@ -178,6 +187,21 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
                 className="w-full mt-1 bg-[var(--surface)] border border-[var(--border)] px-2 py-2"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="text-xs mono text-[var(--muted)]">
+              Fecha límite (deadline duro)
+            </label>
+            <input
+              type="date"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+              className="w-full mt-1 bg-[var(--surface)] border border-[var(--border)] px-2 py-2"
+            />
+            {deadlineBeforeDue && (
+              <p className="text-xs mono text-[var(--danger)] mt-1">{deadlineBeforeDue}</p>
+            )}
           </div>
 
           <div>
@@ -220,7 +244,7 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
             </button>
             <button
               onClick={save}
-              disabled={saving || !dirty || !title.trim()}
+              disabled={saving || !dirty || !title.trim() || !!deadlineBeforeDue}
               className="bg-[var(--accent)] hover:bg-[var(--accent-dim)] text-white px-4 py-1.5 text-sm disabled:opacity-50"
             >
               {saving ? 'Guardando…' : 'Guardar'}

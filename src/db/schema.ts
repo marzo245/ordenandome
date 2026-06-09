@@ -10,6 +10,7 @@ export const tasks = pgTable(
     status: text({ enum: ['todo', 'doing', 'done'] }).notNull().default('todo'),
     priority: text({ enum: ['baja', 'media', 'alta'] }).notNull().default('media'),
     due_date: date(),
+    deadline: date(),
     tags: text().array().default(sql`'{}'`),
     created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
     completed_at: timestamp({ withTimezone: true }),

@@ -56,6 +56,21 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
     setDue('');
   }
 
+  async function moveDueDate(task: Task, newDate: string) {
+    setTasks((t) => t.map((x) => (x.id === task.id ? { ...x, due_date: newDate } : x)));
+    const res = await fetch(`/api/tasks/${task.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ due_date: newDate }),
+    });
+    if (!res.ok) {
+      setTasks((t) => t.map((x) => (x.id === task.id ? task : x)));
+      throw new Error('No se pudo guardar la nueva fecha');
+    }
+    const updated = (await res.json()) as Task;
+    setTasks((t) => t.map((x) => (x.id === task.id ? updated : x)));
+  }
+
   async function persistStatus(task: Task, status: TaskStatus) {
     const res = await fetch(`/api/tasks/${task.id}`, {
       method: 'PATCH',
@@ -183,7 +198,7 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
           </DragOverlay>
         </DndContext>
       ) : (
-        <TaskCalendar tasks={tasks} onSelect={setSelectedTask} />
+        <TaskCalendar tasks={tasks} onSelect={setSelectedTask} onMove={moveDueDate} />
       )}
 
       <TaskDetailModal

@@ -73,6 +73,7 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
           description: draft.description,
           priority: draft.priority,
           due_date: draft.due_date,
+          deadline: draft.deadline,
           tags: draft.estimated_hours ? [`~${draft.estimated_hours}h`] : [],
         }),
       });
