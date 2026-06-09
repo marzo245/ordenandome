@@ -55,12 +55,22 @@ async function fetchNiche(n: Niche, perNiche: number): Promise<NewsItem[]> {
     n.query
   )}&tags=story&hitsPerPage=${perNiche}&numericFilters=points>15`;
 
-  const res = await fetch(url, { next: { revalidate: 600 } });
+  console.log(`[news] ${n.key} fetching:`, url);
+  let res: Response;
+  try {
+    res = await fetch(url, { cache: 'no-store' });
+  } catch (e) {
+    console.error(`[news] ${n.key} fetch threw:`, e);
+    return [];
+  }
+  console.log(`[news] ${n.key} status:`, res.status);
   if (!res.ok) {
-    console.warn(`[news] ${n.key} HTTP ${res.status}`);
+    const body = await res.text();
+    console.warn(`[news] ${n.key} HTTP ${res.status} body:`, body.slice(0, 200));
     return [];
   }
   const data = (await res.json()) as { hits: HnHit[] };
+  console.log(`[news] ${n.key} hits:`, data.hits?.length ?? 0);
 
   return data.hits
     .filter((h) => h.title)
