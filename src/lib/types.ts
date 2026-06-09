@@ -8,9 +8,9 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   due_date: string | null;
-  tags: string[];
-  created_at: string;
-  completed_at: string | null;
+  tags: string[] | null;
+  created_at: string | Date;
+  completed_at: string | Date | null;
 }
 
 export interface GitHubActivity {
@@ -27,5 +27,5 @@ export interface DailySummary {
   id: string;
   day: string;
   content: string;
-  generated_at: string;
+  generated_at: string | Date;
 }
