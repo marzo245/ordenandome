@@ -1,14 +1,24 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { NewsItem, NicheKey } from '@/lib/news';
-import { NICHE_LABELS } from '@/lib/news';
+import type { NewsItem, NicheKey, SourceKey } from '@/lib/news';
+import { NICHE_LABELS, SOURCE_LABELS } from '@/lib/news';
 
 const NICHE_COLOR: Record<NicheKey, string> = {
   dev: 'var(--accent)',
   ai: 'var(--warn)',
   sec: 'var(--danger)',
   startup: 'var(--muted)',
+};
+
+const SOURCE_BADGE: Record<SourceKey, string> = {
+  hn: 'bg-orange-700/30 text-orange-300',
+  devto: 'bg-slate-600/40 text-slate-200',
+  reddit: 'bg-red-800/30 text-red-300',
+  lobsters: 'bg-amber-700/30 text-amber-300',
+  krebs: 'bg-red-900/40 text-red-300',
+  thn: 'bg-red-900/40 text-red-300',
+  arxiv: 'bg-purple-700/30 text-purple-300',
 };
 
 type Filter = 'all' | NicheKey;
@@ -117,28 +127,39 @@ export default function NewsFeed() {
               style={{ borderColor: NICHE_COLOR[it.niche] }}
             >
               <a
-                href={it.url ?? it.hn_url}
+                href={it.url ?? it.comments_url}
                 target="_blank"
                 rel="noreferrer"
-                className="text-sm text-[var(--text)] hover:text-[var(--accent)] block"
+                className="text-sm text-[var(--text)] hover:text-[var(--accent)] flex items-start gap-2"
               >
-                {it.title}
+                <span
+                  className={`mono text-[9px] px-1.5 py-0.5 shrink-0 mt-0.5 ${SOURCE_BADGE[it.source]}`}
+                >
+                  {SOURCE_LABELS[it.source]}
+                </span>
+                <span className="flex-1">{it.title}</span>
               </a>
-              <div className="flex items-center gap-2 mt-0.5 flex-wrap text-[10px] mono text-[var(--muted)]">
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap text-[10px] mono text-[var(--muted)] pl-[42px]">
                 <span style={{ color: NICHE_COLOR[it.niche] }}>
                   {NICHE_LABELS[it.niche]}
                 </span>
                 {host && <span>{host}</span>}
-                <span>·</span>
-                <span>{it.points}↑</span>
-                <a
-                  href={it.hn_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="hover:text-[var(--accent)]"
-                >
-                  {it.num_comments} 💬
-                </a>
+                {(it.points > 0 || it.num_comments > 0) && (
+                  <>
+                    <span>·</span>
+                    {it.points > 0 && <span>{it.points}↑</span>}
+                    {it.num_comments > 0 && (
+                      <a
+                        href={it.comments_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:text-[var(--accent)]"
+                      >
+                        {it.num_comments} 💬
+                      </a>
+                    )}
+                  </>
+                )}
                 <span>·</span>
                 <span>{relativeTime(it.created_at)}</span>
               </div>
