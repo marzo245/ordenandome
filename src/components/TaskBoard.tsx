@@ -4,7 +4,8 @@ import { useState } from 'react';
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useDraggable,
   useDroppable,
   useSensor,
@@ -40,7 +41,8 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
   const [view, setView] = useState<'board' | 'calendar'>('board');
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } })
   );
 
   async function addTask() {
@@ -112,18 +114,18 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
 
   return (
     <section>
-      <div className="flex gap-2 mb-6">
+      <div className="flex flex-wrap gap-2 mb-4 sm:mb-6">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && addTask()}
           placeholder="Nueva tarea…"
-          className="flex-1 bg-[var(--surface)] border border-[var(--border)] px-3 py-2 outline-none focus:border-[var(--accent)]"
+          className="flex-1 min-w-full sm:min-w-0 bg-[var(--surface)] border border-[var(--border)] px-3 py-2 outline-none focus:border-[var(--accent)]"
         />
         <select
           value={priority}
           onChange={(e) => setPriority(e.target.value as TaskPriority)}
-          className="bg-[var(--surface)] border border-[var(--border)] px-2"
+          className="bg-[var(--surface)] border border-[var(--border)] px-2 py-2 flex-1 sm:flex-none"
         >
           <option value="baja">Baja</option>
           <option value="media">Media</option>
@@ -133,17 +135,17 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
           type="date"
           value={due}
           onChange={(e) => setDue(e.target.value)}
-          className="bg-[var(--surface)] border border-[var(--border)] px-2"
+          className="bg-[var(--surface)] border border-[var(--border)] px-2 py-2 flex-1 sm:flex-none"
         />
         <button
           onClick={addTask}
-          className="bg-[var(--accent)] hover:bg-[var(--accent-dim)] px-4 font-medium text-white"
+          className="bg-[var(--accent)] hover:bg-[var(--accent-dim)] px-4 py-2 font-medium text-white flex-1 sm:flex-none"
         >
           Agregar
         </button>
         <button
           onClick={() => setPlannerOpen(true)}
-          className="border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white px-4 font-medium"
+          className="border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white px-4 py-2 font-medium flex-1 sm:flex-none"
           title="Describe la tarea en lenguaje natural y la IA te ayuda a planearla"
         >
           ✨ IA
@@ -181,7 +183,7 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
 
       {view === 'board' ? (
         <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
             {STATUSES.map((col) => (
               <Column
                 key={col.key}
@@ -284,7 +286,7 @@ function Card({
       {...attributes}
       {...listeners}
       onClick={handleClick}
-      className={`bg-[var(--surface)] border-l-2 p-2 group cursor-grab active:cursor-grabbing select-none ${
+      className={`bg-[var(--surface)] border-l-2 p-2 group cursor-grab active:cursor-grabbing select-none touch-none ${
         isDragging && !dragging ? 'opacity-30' : ''
       } ${dragging ? 'shadow-lg ring-1 ring-[var(--accent)]' : ''}`}
       style={{ borderColor: PRIORITY_COLOR[task.priority] }}

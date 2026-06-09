@@ -4,7 +4,8 @@ import { useMemo, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useDraggable,
   useDroppable,
   useSensor,
@@ -66,7 +67,8 @@ export default function TaskCalendar({ tasks, onSelect, onMove }: Props) {
   const [toast, setToast] = useState<string | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } })
   );
 
   const todayKey = ymd(new Date());
@@ -257,7 +259,7 @@ function DayCell({
   return (
     <div
       ref={setNodeRef}
-      className={`border-r border-b border-[var(--border)] min-h-[88px] p-1 text-xs transition-colors ${
+      className={`border-r border-b border-[var(--border)] min-h-[60px] sm:min-h-[88px] p-0.5 sm:p-1 text-[10px] sm:text-xs transition-colors ${
         inMonth ? '' : 'bg-[var(--surface)]/40 text-[var(--muted)]'
       } ${isToday ? 'ring-1 ring-[var(--accent)] ring-inset' : ''} ${
         isOver && !blocked ? 'bg-[var(--accent)]/15' : ''
@@ -316,7 +318,7 @@ function DraggableChip({
       title={`${task.title} · ${task.priority} · ${task.status}${
         task.deadline ? ` · límite ${task.deadline}` : ''
       }`}
-      className={`w-full text-left truncate px-1 py-0.5 border-l-2 cursor-grab active:cursor-grabbing ${
+      className={`w-full text-left truncate px-1 py-0.5 border-l-2 cursor-grab active:cursor-grabbing touch-none ${
         task.status === 'done'
           ? 'line-through opacity-50'
           : task.status === 'doing'

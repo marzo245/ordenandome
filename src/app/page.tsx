@@ -18,15 +18,15 @@ export default async function Page() {
   const summary = summaryRows[0] ?? null;
 
   return (
-    <main className="max-w-6xl mx-auto px-6 py-8">
-      <header className="mb-8 flex items-baseline justify-between">
-        <h1 className="text-2xl font-semibold">
+    <main className="max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-8">
+      <header className="mb-6 sm:mb-8 flex items-baseline justify-between gap-3 flex-wrap">
+        <h1 className="text-xl sm:text-2xl font-semibold">
           Calendario <span className="text-[var(--accent)]">Inteligente</span>
         </h1>
-        <span className="mono text-sm text-[var(--muted)]">{day}</span>
+        <span className="mono text-xs sm:text-sm text-[var(--muted)]">{day}</span>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         <div className="lg:col-span-2">
           <TaskBoard initial={tasksRows} />
         </div>
