@@ -1,12 +1,14 @@
 import type { Task, GithubActivityRow as GitHubActivity } from '@/db';
+import type { NewsItem } from './news';
 
 const MODEL = process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile';
 
 interface SummaryInput {
   day: string;
-  tasksDue: Task[];      // tareas con vencimiento hoy o atrasadas y sin terminar
-  tasksDone: Task[];     // tareas completadas hoy
+  tasksDue: Task[];
+  tasksDone: Task[];
   activity: GitHubActivity[];
+  news: NewsItem[];
 }
 
 const SYSTEM = `Eres un asistente de productividad para un ingeniero de software.
@@ -25,11 +27,18 @@ Estructura obligatoria con encabezados ### y listas con guión:
 ### Prioridad para mañana
 - Punto 1 accionable
 
+### Para leer hoy
+- 2 a 3 noticias del nicho que valga la pena leer, **eligiéndolas según el trabajo del usuario** (tareas del día, repos en los que está commiteando, prioridades).
+- Formato de cada bullet: \`[fuente] [Título corto del artículo](url) — por qué le sirve hoy, 1 línea\`.
+- Si no hay noticias relevantes, escribe "Sin lecturas sugeridas hoy.".
+- NO inventes URLs. Usa SOLO las que vengan en el contexto.
+- NO copies todas las noticias, filtra: máximo 3 y solo si conectan con lo que está haciendo.
+
 REGLAS DE FORMATO
 - Usa SIEMPRE \`-\` para viñetas (nunca \`*\` ni \`+\`).
 - NO anides listas con \`+\` ni con sangría rara.
 - Usa **negrita** solo para destacar términos clave (1-2 por sección).
-- Máximo ~150 palabras totales. Sin relleno, sin saludos, sin firmas.`;
+- Máximo ~200 palabras totales. Sin relleno, sin saludos, sin firmas.`;
 
 export async function generateSummary(input: SummaryInput): Promise<string> {
   const userPrompt = JSON.stringify({
@@ -41,6 +50,13 @@ export async function generateSummary(input: SummaryInput): Promise<string> {
       vence: t.due_date,
     })),
     actividad_github: input.activity.map((a) => `[${a.kind}] ${a.repo}: ${a.title}`),
+    noticias_del_nicho: input.news.slice(0, 25).map((n) => ({
+      fuente: n.source_label,
+      nicho: n.niche_label,
+      titulo: n.title,
+      url: n.url ?? n.comments_url,
+      puntos: n.points,
+    })),
   });
 
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {

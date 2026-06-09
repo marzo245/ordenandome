@@ -3,6 +3,7 @@ import { db, tasks, github_activity, daily_summaries } from '@/db';
 import { and, eq, gte, lte, ne } from 'drizzle-orm';
 import { fetchActivity } from '@/lib/github';
 import { generateSummary } from '@/lib/groq';
+import { fetchNews } from '@/lib/news';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -16,13 +17,14 @@ async function regenerate(): Promise<{ content: string; day: string }> {
     });
   }
 
-  const [ghToday, done, due] = await Promise.all([
+  const [ghToday, done, due, news] = await Promise.all([
     db.select().from(github_activity).where(eq(github_activity.day, day)),
     db
       .select()
       .from(tasks)
       .where(and(eq(tasks.status, 'done'), gte(tasks.completed_at, new Date(`${day}T00:00:00Z`)))),
     db.select().from(tasks).where(and(ne(tasks.status, 'done'), lte(tasks.due_date, day))),
+    fetchNews().catch(() => []),
   ]);
 
   const content = await generateSummary({
@@ -30,6 +32,7 @@ async function regenerate(): Promise<{ content: string; day: string }> {
     tasksDone: done,
     tasksDue: due,
     activity: ghToday,
+    news,
   });
 
   await db
