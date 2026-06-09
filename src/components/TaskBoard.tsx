@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Task, TaskPriority, TaskStatus } from '@/lib/types';
+import TaskPlannerModal from './TaskPlannerModal';
 
 const STATUSES: { key: TaskStatus; label: string }[] = [
   { key: 'todo', label: 'Por hacer' },
@@ -20,6 +21,7 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('media');
   const [due, setDue] = useState('');
+  const [plannerOpen, setPlannerOpen] = useState(false);
 
   async function addTask() {
     if (!title.trim()) return;
@@ -80,7 +82,20 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
         >
           Agregar
         </button>
+        <button
+          onClick={() => setPlannerOpen(true)}
+          className="border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white px-4 font-medium"
+          title="Describe la tarea en lenguaje natural y la IA te ayuda a planearla"
+        >
+          ✨ IA
+        </button>
       </div>
+
+      <TaskPlannerModal
+        open={plannerOpen}
+        onClose={() => setPlannerOpen(false)}
+        onCreated={(task) => setTasks((t) => [task, ...t])}
+      />
 
       <div className="grid grid-cols-3 gap-4">
         {STATUSES.map((col) => (
