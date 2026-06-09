@@ -1,12 +1,14 @@
 # Blueprint de Render. Importa este repo en Render > "New + > Blueprint".
+# El cron del resumen diario está en cron-job.org (Render quitó el plan free
+# para cron jobs). Allí configuras un GET a $APP_URL/api/summary con header
+# "Authorization: Bearer $CRON_SECRET".
 services:
-  # --- App web (Next.js) ---
   - type: web
     name: calendario-inteligente
     runtime: node
     plan: free
     branch: main
-    autoDeploy: true             # Render despliega automáticamente en cada push a main
+    autoDeploy: true
     buildCommand: npm ci && npm run build
     startCommand: npm start
     healthCheckPath: /
@@ -24,26 +26,4 @@ services:
       - key: GROQ_MODEL
         value: llama-3.3-70b-versatile
       - key: CRON_SECRET
-        generateValue: true       # Render lo genera; la app lo valida
-
-  # --- Cron del resumen diario (23:00 UTC) ---
-  # Despierta la app free al pegarle y regenera el resumen del dia.
-  - type: cron
-    name: resumen-diario
-    runtime: node
-    plan: free
-    branch: main
-    schedule: "0 23 * * *"
-    buildCommand: "echo sin-build"
-    startCommand: >
-      curl -fsS --max-time 180 -X GET
-      -H "Authorization: Bearer $CRON_SECRET"
-      "$APP_URL/api/summary"
-    envVars:
-      - key: APP_URL
-        sync: false               # https://calendario-inteligente.onrender.com
-      - key: CRON_SECRET
-        fromService:
-          type: web
-          name: calendario-inteligente
-          envVarKey: CRON_SECRET
+        generateValue: true
