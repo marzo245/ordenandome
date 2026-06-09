@@ -10,6 +10,7 @@ export interface Task {
   due_date: string | null;
   deadline: string | null;
   tags: string[] | null;
+  parent_id: string | null;
   created_at: string | Date;
   completed_at: string | Date | null;
 }

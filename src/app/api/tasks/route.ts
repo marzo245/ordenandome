@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tasks } from '@/db';
-import { asc, desc, sql } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 
 export async function GET() {
   try {
@@ -16,7 +16,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { title, description, priority, due_date, tags } = body;
+  const { title, description, priority, due_date, deadline, tags, parent_id } = body;
 
   if (!title?.trim()) {
     return NextResponse.json({ error: 'title requerido' }, { status: 400 });
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   try {
     const [row] = await db
       .insert(tasks)
-      .values({ title, description, priority, due_date, tags })
+      .values({ title, description, priority, due_date, deadline, tags, parent_id })
       .returning();
     return NextResponse.json(row, { status: 201 });
   } catch (e) {

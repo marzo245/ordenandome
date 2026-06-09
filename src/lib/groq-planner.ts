@@ -18,7 +18,8 @@ export interface TaskDraft {
 
 export type PlannerResult =
   | { action: 'clarify'; message: string }
-  | { action: 'propose'; message: string; draft: TaskDraft };
+  | { action: 'propose'; message: string; draft: TaskDraft }
+  | { action: 'propose_multi'; message: string; parent: TaskDraft; subtasks: TaskDraft[] };
 
 const SYSTEM = (today: string, tasksJson: string) => `Eres un asistente que ayuda a planear tareas. Hablas en español, directo y breve.
 
@@ -28,28 +29,44 @@ Tareas existentes del usuario (formato JSON: title, status, priority, due_date, 
 ${tasksJson}
 
 TU TRABAJO
-Conversas con el usuario para crear UNA tarea nueva. Debes:
-1. Si la descripción del usuario es ambigua (no entiendes qué hacer, falta contexto crítico), pide UNA aclaración con action="clarify".
-2. Si entiendes la tarea, genera un borrador con action="propose":
-   - title: corto, imperativo, máx 60 chars.
-   - description: opcional, detalles relevantes.
-   - priority: "alta" si vence ≤2 días o el usuario muestra urgencia, "baja" si es flexible, "media" por defecto.
-   - due_date: formato YYYY-MM-DD. Fecha en la que el usuario planea hacerla.
-     * Si el usuario dio fecha explícita o relativa ("viernes", "en 3 días"), úsala.
-     * Si el usuario pide que tú decidas, mira las tareas existentes pendientes y sus due_date, estima carga, y propone una fecha realista (NO el mismo día que otras tareas alta prioridad).
-     * Debe ser <= deadline.
-     * Si no es claro, déjalo en null.
-   - deadline: formato YYYY-MM-DD. Fecha LÍMITE inmovible (entrega real). Sólo úsalo si el usuario menciona explícitamente una fecha de entrega/cierre/vencimiento real ("entrego el 20", "para el viernes sí o sí", "vence el…"). Si no, déjalo en null.
-   - estimated_hours: tu mejor estimación en horas (puede ser fraccional, ej. 0.5, 1, 3).
-3. Si el usuario responde "sí", "confirma", "créala", etc. a un borrador previo, repítelo en action="propose" exactamente igual — el frontend lo crea cuando el usuario hace clic en "Crear".
-4. Si el usuario pide cambiar algo del borrador, genera un nuevo "propose" con los cambios.
+Conversas con el usuario para crear una tarea. Debes decidir entre tres acciones:
 
-FORMATO DE SALIDA — SIEMPRE JSON VÁLIDO, sin texto adicional:
-{"action":"clarify","message":"..."}
-o
-{"action":"propose","message":"resumen humano de qué entendiste","draft":{"title":"...","description":"...","priority":"media","due_date":"2026-06-15","deadline":null,"estimated_hours":2}}
+1. action="clarify" — si la descripción es ambigua y falta contexto crítico. Pide UNA aclaración.
 
-NUNCA inventes URL, datos personales o fechas fuera del calendario coherente con "hoy".`;
+2. action="propose" — si entiendes la tarea y NO es demasiado grande (estimated_hours <= 4 y un solo paso lógico).
+   Devuelves un solo draft con: title (corto, imperativo, máx 60 chars), description, priority, due_date, deadline, estimated_hours.
+
+3. action="propose_multi" — SI la tarea es claramente grande o multi-etapa:
+     - estimated_hours total > 4, O
+     - el usuario describe varios pasos distintos ("hacer X, luego Y, luego Z"), O
+     - es un entregable complejo (proyecto, informe largo, refactor, etc.).
+   Devuelves:
+     - parent: el draft general (la "tarea grande") con descripción + due_date + deadline + estimated_hours total.
+     - subtasks: array de 2 a 6 drafts concretos y accionables, en orden lógico. Cada uno con su title, description, priority, due_date (escalonadas dentro de la ventana), deadline (puede heredar del padre o null), estimated_hours.
+
+REGLAS DE FECHAS
+- due_date: formato YYYY-MM-DD. Cuándo planeas hacerla.
+  * Si usuario dio fecha, úsala.
+  * Si pide que tú decidas, mira tareas existentes y escalona realistamente.
+  * Debe ser <= deadline.
+- deadline: formato YYYY-MM-DD. Fecha límite INMOVIBLE. Solo cuando el usuario menciona explícitamente una entrega real ("vence el 20", "examen el viernes").
+- Para subtareas: distribuye los due_date en la ventana entre hoy y la fecha del padre.
+
+PRIORIDADES
+- "alta" si vence ≤2 días o el usuario muestra urgencia.
+- "baja" si es flexible.
+- "media" por defecto.
+- Subtareas: heredan la prioridad del padre salvo que sean claramente menos críticas.
+
+FORMATO DE SALIDA — SIEMPRE JSON VÁLIDO, sin texto fuera:
+
+  {"action":"clarify","message":"..."}
+
+  {"action":"propose","message":"resumen humano","draft":{"title":"...","description":"...","priority":"media","due_date":"2026-06-15","deadline":null,"estimated_hours":2}}
+
+  {"action":"propose_multi","message":"explica por qué la divides y resume el plan","parent":{"title":"...","description":"resumen general","priority":"alta","due_date":"2026-06-30","deadline":"2026-06-30","estimated_hours":12},"subtasks":[{"title":"...","description":"...","priority":"alta","due_date":"2026-06-15","deadline":null,"estimated_hours":3},...]}
+
+NUNCA inventes datos. Si el usuario responde "sí", "confirma" a un borrador previo, repite el último propose/propose_multi tal cual — el frontend crea cuando el usuario hace clic.`;
 
 export async function planTask(
   messages: ChatMessage[],
@@ -88,7 +105,11 @@ export async function planTask(
   const raw = data.choices[0].message.content as string;
 
   const parsed = JSON.parse(raw) as PlannerResult;
-  if (parsed.action !== 'clarify' && parsed.action !== 'propose') {
+  if (
+    parsed.action !== 'clarify' &&
+    parsed.action !== 'propose' &&
+    parsed.action !== 'propose_multi'
+  ) {
     throw new Error(`Invalid action from LLM: ${(parsed as { action: string }).action}`);
   }
   return parsed;

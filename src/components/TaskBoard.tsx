@@ -153,7 +153,7 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
       <TaskPlannerModal
         open={plannerOpen}
         onClose={() => setPlannerOpen(false)}
-        onCreated={(task) => setTasks((t) => [task, ...t])}
+        onCreated={(created) => setTasks((t) => [...created, ...t])}
       />
 
       <nav className="flex gap-1 mb-4 border-b border-[var(--border)]">
@@ -188,6 +188,7 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
                 status={col.key}
                 label={col.label}
                 tasks={tasks.filter((t) => t.status === col.key)}
+                allTasks={tasks}
                 onRemove={remove}
                 onSelect={setSelectedTask}
               />
@@ -217,12 +218,14 @@ function Column({
   status,
   label,
   tasks,
+  allTasks,
   onRemove,
   onSelect,
 }: {
   status: TaskStatus;
   label: string;
   tasks: Task[];
+  allTasks: Task[];
   onRemove: (id: string) => void;
   onSelect: (task: Task) => void;
 }) {
@@ -239,7 +242,13 @@ function Column({
         }`}
       >
         {tasks.map((t) => (
-          <Card key={t.id} task={t} onRemove={onRemove} onSelect={onSelect} />
+          <Card
+            key={t.id}
+            task={t}
+            onRemove={onRemove}
+            onSelect={onSelect}
+            subtaskCount={allTasks.filter((x) => x.parent_id === t.id).length}
+          />
         ))}
       </div>
     </div>
@@ -251,11 +260,13 @@ function Card({
   onRemove,
   onSelect,
   dragging = false,
+  subtaskCount = 0,
 }: {
   task: Task;
   onRemove?: (id: string) => void;
   onSelect?: (task: Task) => void;
   dragging?: boolean;
+  subtaskCount?: number;
 }) {
   const { attributes, listeners, setNodeRef, isDragging, transform } = useDraggable({
     id: task.id,
@@ -279,7 +290,15 @@ function Card({
       style={{ borderColor: PRIORITY_COLOR[task.priority] }}
     >
       <div className="flex justify-between items-start gap-2">
-        <span className="text-sm">{task.title}</span>
+        <span className="text-sm">
+          {task.parent_id && <span className="text-[var(--muted)] mr-1">↳</span>}
+          {task.title}
+          {subtaskCount > 0 && (
+            <span className="ml-2 text-xs mono text-[var(--muted)]">
+              ({subtaskCount} subt.)
+            </span>
+          )}
+        </span>
         {onRemove && (
           <button
             data-no-open

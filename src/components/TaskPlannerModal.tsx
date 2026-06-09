@@ -7,12 +7,16 @@ import type { ChatMessage, PlannerResult, TaskDraft } from '@/lib/groq-planner';
 interface Props {
   open: boolean;
   onClose: () => void;
-  onCreated: (task: Task) => void;
+  onCreated: (tasks: Task[]) => void;
 }
+
+type Proposal =
+  | { kind: 'single'; draft: TaskDraft }
+  | { kind: 'multi'; parent: TaskDraft; subtasks: TaskDraft[] };
 
 export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [draft, setDraft] = useState<TaskDraft | null>(null);
+  const [proposal, setProposal] = useState<Proposal | null>(null);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +25,7 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
   useEffect(() => {
     if (!open) {
       setMessages([]);
-      setDraft(null);
+      setProposal(null);
       setInput('');
       setError(null);
     }
@@ -51,8 +55,13 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
       if ('error' in data) throw new Error(data.error);
 
       setMessages((m) => [...m, { role: 'assistant', content: data.message }]);
-      if (data.action === 'propose') setDraft(data.draft);
-      else setDraft(null);
+      if (data.action === 'propose') {
+        setProposal({ kind: 'single', draft: data.draft });
+      } else if (data.action === 'propose_multi') {
+        setProposal({ kind: 'multi', parent: data.parent, subtasks: data.subtasks });
+      } else {
+        setProposal(null);
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -60,26 +69,45 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
     }
   }
 
-  async function createTask() {
-    if (!draft) return;
+  function draftToBody(d: TaskDraft, parent_id: string | null = null) {
+    return {
+      title: d.title,
+      description: d.description,
+      priority: d.priority,
+      due_date: d.due_date,
+      deadline: d.deadline,
+      parent_id,
+      tags: d.estimated_hours ? [`~${d.estimated_hours}h`] : [],
+    };
+  }
+
+  async function postOne(body: object): Promise<Task> {
+    const res = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const task = await res.json();
+    if (!res.ok) throw new Error((task as { error: string }).error ?? 'Error creando tarea');
+    return task as Task;
+  }
+
+  async function createAll() {
+    if (!proposal) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: draft.title,
-          description: draft.description,
-          priority: draft.priority,
-          due_date: draft.due_date,
-          deadline: draft.deadline,
-          tags: draft.estimated_hours ? [`~${draft.estimated_hours}h`] : [],
-        }),
-      });
-      const task = (await res.json()) as Task;
-      if (!res.ok) throw new Error((task as unknown as { error: string }).error);
-      onCreated(task);
+      if (proposal.kind === 'single') {
+        const t = await postOne(draftToBody(proposal.draft));
+        onCreated([t]);
+      } else {
+        const parent = await postOne(draftToBody(proposal.parent));
+        const subs: Task[] = [];
+        for (const s of proposal.subtasks) {
+          subs.push(await postOne(draftToBody(s, parent.id)));
+        }
+        onCreated([parent, ...subs]);
+      }
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -112,7 +140,7 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.length === 0 && (
             <p className="text-sm text-[var(--muted)]">
-              Describe la tarea con tus palabras. Ej: <em>&ldquo;Tengo que entregar el informe de bases de datos para revisión del profe&rdquo;</em>. La IA te confirmará lo que entendió y propondrá fecha y tiempo estimado en función de tus tareas actuales.
+              Describe la tarea con tus palabras. La IA confirma lo que entendió y propone fecha y tiempo estimado. Si la tarea es grande, te propondrá <strong>dividirla en subtareas</strong>.
             </p>
           )}
           {messages.map((m, i) => (
@@ -121,7 +149,7 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
               className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[80%] px-3 py-2 text-sm ${
+                className={`max-w-[80%] px-3 py-2 text-sm whitespace-pre-wrap ${
                   m.role === 'user'
                     ? 'bg-[var(--accent)] text-white'
                     : 'bg-[var(--surface)] border border-[var(--border)]'
@@ -139,30 +167,35 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
           )}
         </div>
 
-        {draft && (
-          <div className="border-t border-[var(--border)] bg-[var(--surface)] p-4 space-y-2">
-            <div className="text-xs text-[var(--muted)] mono">Borrador propuesto</div>
-            <div className="font-medium">{draft.title}</div>
-            {draft.description && (
-              <div className="text-sm text-[var(--muted)]">{draft.description}</div>
+        {proposal && (
+          <div className="border-t border-[var(--border)] bg-[var(--surface)] p-4 space-y-3 max-h-[40vh] overflow-y-auto">
+            {proposal.kind === 'single' ? (
+              <DraftPreview label="Borrador propuesto" draft={proposal.draft} />
+            ) : (
+              <>
+                <DraftPreview
+                  label={`Tarea principal (con ${proposal.subtasks.length} subtareas)`}
+                  draft={proposal.parent}
+                />
+                <div className="pl-3 border-l-2 border-[var(--accent)] space-y-2">
+                  {proposal.subtasks.map((s, i) => (
+                    <DraftPreview key={i} label={`↳ Subtarea ${i + 1}`} draft={s} compact />
+                  ))}
+                </div>
+              </>
             )}
-            <div className="flex gap-3 text-xs mono text-[var(--muted)] flex-wrap">
-              <span>prioridad: {draft.priority}</span>
-              {draft.due_date && <span>vence: {draft.due_date}</span>}
-              {draft.estimated_hours != null && (
-                <span>estimado: ~{draft.estimated_hours}h</span>
-              )}
-            </div>
             <div className="flex gap-2 pt-2">
               <button
-                onClick={createTask}
+                onClick={createAll}
                 disabled={loading}
                 className="bg-[var(--accent)] hover:bg-[var(--accent-dim)] text-white px-4 py-1.5 text-sm disabled:opacity-50"
               >
-                Crear tarea
+                {proposal.kind === 'multi'
+                  ? `Crear ${1 + proposal.subtasks.length} tareas`
+                  : 'Crear tarea'}
               </button>
               <button
-                onClick={() => setDraft(null)}
+                onClick={() => setProposal(null)}
                 className="border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface)]"
               >
                 Pedir cambios
@@ -176,7 +209,7 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && send()}
-            placeholder={draft ? 'Pide cambios o confirma…' : 'Describe la tarea…'}
+            placeholder={proposal ? 'Pide cambios o confirma…' : 'Describe la tarea…'}
             disabled={loading}
             className="flex-1 bg-[var(--surface)] border border-[var(--border)] px-3 py-2 outline-none focus:border-[var(--accent)] disabled:opacity-50"
             autoFocus
@@ -189,6 +222,32 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
             Enviar
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function DraftPreview({
+  label,
+  draft,
+  compact = false,
+}: {
+  label: string;
+  draft: TaskDraft;
+  compact?: boolean;
+}) {
+  return (
+    <div>
+      <div className="text-xs text-[var(--muted)] mono">{label}</div>
+      <div className={compact ? 'text-sm font-medium' : 'font-medium'}>{draft.title}</div>
+      {draft.description && !compact && (
+        <div className="text-sm text-[var(--muted)]">{draft.description}</div>
+      )}
+      <div className="flex gap-3 text-xs mono text-[var(--muted)] flex-wrap mt-1">
+        <span>prio: {draft.priority}</span>
+        {draft.due_date && <span>vence: {draft.due_date}</span>}
+        {draft.deadline && <span>límite: {draft.deadline}</span>}
+        {draft.estimated_hours != null && <span>~{draft.estimated_hours}h</span>}
       </div>
     </div>
   );

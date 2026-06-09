@@ -12,10 +12,14 @@ export const tasks = pgTable(
     due_date: date(),
     deadline: date(),
     tags: text().array().default(sql`'{}'`),
+    parent_id: uuid(),
     created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
     completed_at: timestamp({ withTimezone: true }),
   },
-  (t) => [index('idx_tasks_due').on(t.due_date)]
+  (t) => [
+    index('idx_tasks_due').on(t.due_date),
+    index('idx_tasks_parent').on(t.parent_id),
+  ]
 );
 
 export const github_activity = pgTable(
