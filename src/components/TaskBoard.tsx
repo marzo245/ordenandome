@@ -1,6 +1,17 @@
 'use client';
 
 import { useState } from 'react';
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+} from '@dnd-kit/core';
 import type { Task, TaskPriority, TaskStatus } from '@/lib/types';
 import TaskPlannerModal from './TaskPlannerModal';
 
@@ -22,6 +33,11 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
   const [priority, setPriority] = useState<TaskPriority>('media');
   const [due, setDue] = useState('');
   const [plannerOpen, setPlannerOpen] = useState(false);
+  const [activeTask, setActiveTask] = useState<Task | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
+  );
 
   async function addTask() {
     if (!title.trim()) return;
@@ -36,19 +52,43 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
     setDue('');
   }
 
-  async function move(task: Task, status: TaskStatus) {
+  async function persistStatus(task: Task, status: TaskStatus) {
     const res = await fetch(`/api/tasks/${task.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
-    const updated = await res.json();
+    if (!res.ok) {
+      setTasks((t) => t.map((x) => (x.id === task.id ? task : x)));
+      return;
+    }
+    const updated = (await res.json()) as Task;
     setTasks((t) => t.map((x) => (x.id === task.id ? updated : x)));
   }
 
   async function remove(id: string) {
     await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
     setTasks((t) => t.filter((x) => x.id !== id));
+  }
+
+  function handleDragStart(e: DragStartEvent) {
+    const t = tasks.find((x) => x.id === e.active.id);
+    if (t) setActiveTask(t);
+  }
+
+  function handleDragEnd(e: DragEndEvent) {
+    setActiveTask(null);
+    const overId = e.over?.id as TaskStatus | undefined;
+    const activeId = e.active.id as string;
+    if (!overId) return;
+
+    const task = tasks.find((x) => x.id === activeId);
+    if (!task || task.status === overId) return;
+
+    setTasks((t) =>
+      t.map((x) => (x.id === activeId ? { ...x, status: overId } : x))
+    );
+    persistStatus(task, overId);
   }
 
   return (
@@ -97,50 +137,95 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
         onCreated={(task) => setTasks((t) => [task, ...t])}
       />
 
-      <div className="grid grid-cols-3 gap-4">
-        {STATUSES.map((col) => (
-          <div key={col.key} className="border border-[var(--border)]">
-            <h3 className="px-3 py-2 text-sm font-semibold text-[var(--muted)] border-b border-[var(--border)]">
-              {col.label} · {tasks.filter((t) => t.status === col.key).length}
-            </h3>
-            <div className="p-2 space-y-2 min-h-[120px]">
-              {tasks
-                .filter((t) => t.status === col.key)
-                .map((t) => (
-                  <article
-                    key={t.id}
-                    className="bg-[var(--surface)] border-l-2 p-2 group"
-                    style={{ borderColor: PRIORITY_COLOR[t.priority] }}
-                  >
-                    <div className="flex justify-between items-start gap-2">
-                      <span className="text-sm">{t.title}</span>
-                      <button
-                        onClick={() => remove(t.id)}
-                        className="text-[var(--muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--danger)]"
-                      >
-                        ×
-                      </button>
-                    </div>
-                    {t.due_date && (
-                      <span className="mono text-xs text-[var(--muted)]">{t.due_date}</span>
-                    )}
-                    <div className="flex gap-1 mt-2">
-                      {STATUSES.filter((s) => s.key !== col.key).map((s) => (
-                        <button
-                          key={s.key}
-                          onClick={() => move(t, s.key)}
-                          className="mono text-xs text-[var(--accent)] hover:underline"
-                        >
-                          →{s.label}
-                        </button>
-                      ))}
-                    </div>
-                  </article>
-                ))}
-            </div>
-          </div>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <div className="grid grid-cols-3 gap-4">
+          {STATUSES.map((col) => (
+            <Column
+              key={col.key}
+              status={col.key}
+              label={col.label}
+              tasks={tasks.filter((t) => t.status === col.key)}
+              onRemove={remove}
+            />
+          ))}
+        </div>
+        <DragOverlay>
+          {activeTask ? <Card task={activeTask} dragging /> : null}
+        </DragOverlay>
+      </DndContext>
+    </section>
+  );
+}
+
+function Column({
+  status,
+  label,
+  tasks,
+  onRemove,
+}: {
+  status: TaskStatus;
+  label: string;
+  tasks: Task[];
+  onRemove: (id: string) => void;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+  return (
+    <div className="border border-[var(--border)]">
+      <h3 className="px-3 py-2 text-sm font-semibold text-[var(--muted)] border-b border-[var(--border)]">
+        {label} · {tasks.length}
+      </h3>
+      <div
+        ref={setNodeRef}
+        className={`p-2 space-y-2 min-h-[120px] transition-colors ${
+          isOver ? 'bg-[var(--accent-dim)]/20' : ''
+        }`}
+      >
+        {tasks.map((t) => (
+          <Card key={t.id} task={t} onRemove={onRemove} />
         ))}
       </div>
-    </section>
+    </div>
+  );
+}
+
+function Card({
+  task,
+  onRemove,
+  dragging = false,
+}: {
+  task: Task;
+  onRemove?: (id: string) => void;
+  dragging?: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: task.id,
+  });
+
+  return (
+    <article
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      className={`bg-[var(--surface)] border-l-2 p-2 group cursor-grab active:cursor-grabbing select-none ${
+        isDragging && !dragging ? 'opacity-30' : ''
+      } ${dragging ? 'shadow-lg ring-1 ring-[var(--accent)]' : ''}`}
+      style={{ borderColor: PRIORITY_COLOR[task.priority] }}
+    >
+      <div className="flex justify-between items-start gap-2">
+        <span className="text-sm">{task.title}</span>
+        {onRemove && (
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => onRemove(task.id)}
+            className="text-[var(--muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--danger)]"
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {task.due_date && (
+        <span className="mono text-xs text-[var(--muted)]">{task.due_date}</span>
+      )}
+    </article>
   );
 }
