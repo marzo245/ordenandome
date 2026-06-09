@@ -8,7 +8,7 @@ interface Props {
   task: Task | null;
   allTasks: Task[];
   onClose: () => void;
-  onUpdated: (task: Task) => void;
+  onUpdated: (data: { task: Task; affected: Task[] }) => void;
   onDeleted: (id: string) => void;
   onSelectTask: (task: Task) => void;
 }
@@ -35,6 +35,7 @@ export default function TaskDetailModal({
   const [tags, setTags] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [tab, setTab] = useState<'detail' | 'chat'>('detail');
 
   useEffect(() => {
@@ -91,8 +92,15 @@ export default function TaskDetailModal({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Error al guardar');
-      onUpdated(data as Task);
-      onClose();
+      onUpdated(data as { task: Task; affected: Task[] });
+      if (data.affected?.length) {
+        setInfo(
+          `${data.affected.length} subtarea(s) reagendadas para caber en la nueva fecha.`
+        );
+        setTimeout(onClose, 1800);
+      } else {
+        onClose();
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -293,6 +301,9 @@ export default function TaskDetailModal({
 
           {error && (
             <div className="text-xs mono text-[var(--danger)]">{error}</div>
+          )}
+          {info && (
+            <div className="text-xs mono text-[var(--accent)]">{info}</div>
           )}
         </div>
 

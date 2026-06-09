@@ -69,8 +69,15 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
       setTasks((t) => t.map((x) => (x.id === task.id ? task : x)));
       throw new Error('No se pudo guardar la nueva fecha');
     }
-    const updated = (await res.json()) as Task;
-    setTasks((t) => t.map((x) => (x.id === task.id ? updated : x)));
+    const data = (await res.json()) as { task: Task; affected: Task[] };
+    mergeUpdated(data);
+  }
+
+  function mergeUpdated(data: { task: Task; affected: Task[] }) {
+    const byId = new Map<string, Task>();
+    byId.set(data.task.id, data.task);
+    for (const a of data.affected) byId.set(a.id, a);
+    setTasks((t) => t.map((x) => byId.get(x.id) ?? x));
   }
 
   async function persistStatus(task: Task, status: TaskStatus) {
@@ -83,8 +90,8 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
       setTasks((t) => t.map((x) => (x.id === task.id ? task : x)));
       return;
     }
-    const updated = (await res.json()) as Task;
-    setTasks((t) => t.map((x) => (x.id === task.id ? updated : x)));
+    const data = (await res.json()) as { task: Task; affected: Task[] };
+    mergeUpdated(data);
   }
 
   async function remove(id: string) {
@@ -208,9 +215,7 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
         task={selectedTask}
         allTasks={tasks}
         onClose={() => setSelectedTask(null)}
-        onUpdated={(updated) =>
-          setTasks((t) => t.map((x) => (x.id === updated.id ? updated : x)))
-        }
+        onUpdated={(data) => mergeUpdated(data)}
         onDeleted={(id) => setTasks((t) => t.filter((x) => x.id !== id))}
         onSelectTask={setSelectedTask}
       />
