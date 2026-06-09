@@ -14,6 +14,7 @@ import {
 } from '@dnd-kit/core';
 import type { Task, TaskPriority, TaskStatus } from '@/lib/types';
 import TaskPlannerModal from './TaskPlannerModal';
+import TaskDetailModal from './TaskDetailModal';
 
 const STATUSES: { key: TaskStatus; label: string }[] = [
   { key: 'todo', label: 'Por hacer' },
@@ -34,6 +35,7 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
   const [due, setDue] = useState('');
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
@@ -146,6 +148,7 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
               label={col.label}
               tasks={tasks.filter((t) => t.status === col.key)}
               onRemove={remove}
+              onSelect={setSelectedTask}
             />
           ))}
         </div>
@@ -153,6 +156,15 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
           {activeTask ? <Card task={activeTask} dragging /> : null}
         </DragOverlay>
       </DndContext>
+
+      <TaskDetailModal
+        task={selectedTask}
+        onClose={() => setSelectedTask(null)}
+        onUpdated={(updated) =>
+          setTasks((t) => t.map((x) => (x.id === updated.id ? updated : x)))
+        }
+        onDeleted={(id) => setTasks((t) => t.filter((x) => x.id !== id))}
+      />
     </section>
   );
 }
@@ -162,11 +174,13 @@ function Column({
   label,
   tasks,
   onRemove,
+  onSelect,
 }: {
   status: TaskStatus;
   label: string;
   tasks: Task[];
   onRemove: (id: string) => void;
+  onSelect: (task: Task) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   return (
@@ -181,7 +195,7 @@ function Column({
         }`}
       >
         {tasks.map((t) => (
-          <Card key={t.id} task={t} onRemove={onRemove} />
+          <Card key={t.id} task={t} onRemove={onRemove} onSelect={onSelect} />
         ))}
       </div>
     </div>
@@ -191,21 +205,30 @@ function Column({
 function Card({
   task,
   onRemove,
+  onSelect,
   dragging = false,
 }: {
   task: Task;
   onRemove?: (id: string) => void;
+  onSelect?: (task: Task) => void;
   dragging?: boolean;
 }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, isDragging, transform } = useDraggable({
     id: task.id,
   });
+
+  function handleClick(e: React.MouseEvent) {
+    if (transform || isDragging) return;
+    if ((e.target as HTMLElement).closest('[data-no-open]')) return;
+    onSelect?.(task);
+  }
 
   return (
     <article
       ref={setNodeRef}
       {...attributes}
       {...listeners}
+      onClick={handleClick}
       className={`bg-[var(--surface)] border-l-2 p-2 group cursor-grab active:cursor-grabbing select-none ${
         isDragging && !dragging ? 'opacity-30' : ''
       } ${dragging ? 'shadow-lg ring-1 ring-[var(--accent)]' : ''}`}
@@ -215,8 +238,12 @@ function Card({
         <span className="text-sm">{task.title}</span>
         {onRemove && (
           <button
+            data-no-open
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => onRemove(task.id)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove(task.id);
+            }}
             className="text-[var(--muted)] opacity-0 group-hover:opacity-100 hover:text-[var(--danger)]"
           >
             ×
