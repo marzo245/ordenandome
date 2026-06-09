@@ -206,11 +206,13 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
 
       <TaskDetailModal
         task={selectedTask}
+        allTasks={tasks}
         onClose={() => setSelectedTask(null)}
         onUpdated={(updated) =>
           setTasks((t) => t.map((x) => (x.id === updated.id ? updated : x)))
         }
         onDeleted={(id) => setTasks((t) => t.filter((x) => x.id !== id))}
+        onSelectTask={setSelectedTask}
       />
     </section>
   );
@@ -232,6 +234,11 @@ function Column({
   onSelect: (task: Task) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
+
+  // Agrupa visualmente: padre primero, después sus subtareas (de esta columna),
+  // luego huérfanos (subtareas cuyo padre está en otra columna), luego standalone.
+  const ordered = orderForColumn(tasks, allTasks);
+
   return (
     <div className="border border-[var(--border)]">
       <h3 className="px-3 py-2 text-sm font-semibold text-[var(--muted)] border-b border-[var(--border)]">
@@ -243,28 +250,70 @@ function Column({
           isOver ? 'bg-[var(--accent-dim)]/20' : ''
         }`}
       >
-        {tasks.map((t) => (
-          <Card
-            key={t.id}
-            task={t}
-            onRemove={onRemove}
-            onSelect={onSelect}
-            subtaskCount={allTasks.filter((x) => x.parent_id === t.id).length}
-          />
-        ))}
+        {ordered.map((t) => {
+          const parent = t.parent_id
+            ? allTasks.find((x) => x.id === t.parent_id) ?? null
+            : null;
+          return (
+            <Card
+              key={t.id}
+              task={t}
+              parent={parent}
+              parentInSameColumn={parent ? parent.status === status : false}
+              onRemove={onRemove}
+              onSelect={onSelect}
+              subtaskCount={allTasks.filter((x) => x.parent_id === t.id).length}
+            />
+          );
+        })}
       </div>
     </div>
   );
 }
 
+function orderForColumn(tasksInCol: Task[], allTasks: Task[]): Task[] {
+  const inColIds = new Set(tasksInCol.map((t) => t.id));
+  const visited = new Set<string>();
+  const out: Task[] = [];
+
+  const childrenOf = (id: string) =>
+    tasksInCol.filter((t) => t.parent_id === id);
+
+  for (const t of tasksInCol) {
+    if (visited.has(t.id)) continue;
+    const parentInCol = t.parent_id ? inColIds.has(t.parent_id) : false;
+    if (parentInCol) continue; // se renderiza bajo su padre
+
+    out.push(t);
+    visited.add(t.id);
+    for (const child of childrenOf(t.id)) {
+      if (visited.has(child.id)) continue;
+      out.push(child);
+      visited.add(child.id);
+    }
+  }
+  // Huérfanos (subtareas cuyo padre no está en esta columna)
+  for (const t of tasksInCol) {
+    if (!visited.has(t.id)) {
+      out.push(t);
+      visited.add(t.id);
+    }
+  }
+  return out;
+}
+
 function Card({
   task,
+  parent = null,
+  parentInSameColumn = false,
   onRemove,
   onSelect,
   dragging = false,
   subtaskCount = 0,
 }: {
   task: Task;
+  parent?: Task | null;
+  parentInSameColumn?: boolean;
   onRemove?: (id: string) => void;
   onSelect?: (task: Task) => void;
   dragging?: boolean;
@@ -288,9 +337,16 @@ function Card({
       onClick={handleClick}
       className={`bg-[var(--surface)] border-l-2 p-2 group cursor-grab active:cursor-grabbing select-none touch-none ${
         isDragging && !dragging ? 'opacity-30' : ''
-      } ${dragging ? 'shadow-lg ring-1 ring-[var(--accent)]' : ''}`}
+      } ${dragging ? 'shadow-lg ring-1 ring-[var(--accent)]' : ''} ${
+        parentInSameColumn ? 'ml-4' : ''
+      }`}
       style={{ borderColor: PRIORITY_COLOR[task.priority] }}
     >
+      {parent && !parentInSameColumn && (
+        <div className="text-[10px] mono text-[var(--muted)] truncate mb-0.5">
+          de: <span className="text-[var(--accent)]">{parent.title}</span>
+        </div>
+      )}
       <div className="flex justify-between items-start gap-2">
         <span className="text-sm">
           {task.parent_id && <span className="text-[var(--muted)] mr-1">↳</span>}

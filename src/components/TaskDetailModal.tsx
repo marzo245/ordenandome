@@ -6,12 +6,27 @@ import TaskChat from './TaskChat';
 
 interface Props {
   task: Task | null;
+  allTasks: Task[];
   onClose: () => void;
   onUpdated: (task: Task) => void;
   onDeleted: (id: string) => void;
+  onSelectTask: (task: Task) => void;
 }
 
-export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }: Props) {
+const STATUS_LABEL: Record<Task['status'], string> = {
+  todo: 'Por hacer',
+  doing: 'En curso',
+  done: 'Hecho',
+};
+
+export default function TaskDetailModal({
+  task,
+  allTasks,
+  onClose,
+  onUpdated,
+  onDeleted,
+  onSelectTask,
+}: Props) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('media');
@@ -35,6 +50,11 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
   }, [task]);
 
   if (!task) return null;
+
+  const parent = task.parent_id
+    ? allTasks.find((t) => t.id === task.parent_id) ?? null
+    : null;
+  const subtasks = allTasks.filter((t) => t.parent_id === task.id);
 
   const dirty =
     title !== task.title ||
@@ -146,6 +166,17 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
         ) : (
         <>
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {parent && (
+            <div className="bg-[var(--surface)] border-l-2 border-[var(--accent)] p-2">
+              <div className="text-[10px] mono text-[var(--muted)]">Subtarea de</div>
+              <button
+                onClick={() => onSelectTask(parent)}
+                className="text-sm text-[var(--accent)] hover:underline text-left"
+              >
+                ↑ {parent.title}
+              </button>
+            </div>
+          )}
           <div>
             <label className="text-xs mono text-[var(--muted)]">Título</label>
             <input
@@ -215,6 +246,44 @@ export default function TaskDetailModal({ task, onClose, onUpdated, onDeleted }:
               className="w-full mt-1 bg-[var(--surface)] border border-[var(--border)] px-3 py-2 outline-none focus:border-[var(--accent)]"
             />
           </div>
+
+          {subtasks.length > 0 && (
+            <div className="border-t border-[var(--border)] pt-3">
+              <div className="text-xs mono text-[var(--muted)] mb-2">
+                Subtareas ({subtasks.filter((s) => s.status === 'done').length}/{subtasks.length} hechas)
+              </div>
+              <ul className="space-y-1">
+                {subtasks.map((s) => (
+                  <li key={s.id}>
+                    <button
+                      onClick={() => onSelectTask(s)}
+                      className="w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 bg-[var(--surface)] border-l-2 hover:bg-[var(--bg)] transition-colors"
+                      style={{
+                        borderColor:
+                          s.priority === 'alta'
+                            ? 'var(--danger)'
+                            : s.priority === 'media'
+                            ? 'var(--warn)'
+                            : 'var(--muted)',
+                      }}
+                    >
+                      <span
+                        className={`text-sm truncate ${
+                          s.status === 'done' ? 'line-through opacity-60' : ''
+                        }`}
+                      >
+                        ↳ {s.title}
+                      </span>
+                      <span className="mono text-[10px] text-[var(--muted)] shrink-0">
+                        {STATUS_LABEL[s.status]}
+                        {s.due_date ? ` · ${s.due_date}` : ''}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="text-xs mono text-[var(--muted)] space-y-1 pt-2 border-t border-[var(--border)]">
             <div>estado: {task.status}</div>
