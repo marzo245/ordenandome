@@ -51,9 +51,11 @@ interface HnHit {
 }
 
 async function fetchNiche(n: Niche, perNiche: number): Promise<NewsItem[]> {
-  const url = `https://hn.algolia.com/api/v1/search_by_date?query=${encodeURIComponent(
+  // /search ordena por popularidad. Sin filtro de fecha (el reloj del sistema
+  // puede no coincidir con la realidad). Los hits más relevantes vienen primero.
+  const url = `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(
     n.query
-  )}&tags=story&hitsPerPage=${perNiche}&numericFilters=points>15`;
+  )}&tags=story&hitsPerPage=${perNiche}`;
 
   console.log(`[news] ${n.key} fetching:`, url);
   let res: Response;
