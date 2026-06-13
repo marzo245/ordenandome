@@ -1,8 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import type { Task, TaskPriority } from '@/lib/types';
+import { useEffect, useRef, useState } from 'react';
+import type { Task, TaskStatus, TaskPriority, TaskType } from '@/lib/types';
 import TaskChat from './TaskChat';
+import StatusPill from '@/components/properties/StatusPill';
+import PriorityPill from '@/components/properties/PriorityPill';
+import TypePill from '@/components/properties/TypePill';
+import TagsMultiSelect from '@/components/properties/TagsMultiSelect';
+import DateRangeField from '@/components/properties/DateRangeField';
 
 interface Props {
   task: Task | null;
@@ -19,6 +24,19 @@ const STATUS_LABEL: Record<Task['status'], string> = {
   done: 'Hecho',
 };
 
+type PatchPayload = Partial<{
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  type: TaskType;
+  due_date: string | null;
+  deadline: string | null;
+  tags: string[];
+}>;
+
+type SaveState = 'idle' | 'saving' | 'saved';
+
 export default function TaskDetailModal({
   task,
   allTasks,
@@ -27,28 +45,56 @@ export default function TaskDetailModal({
   onDeleted,
   onSelectTask,
 }: Props) {
+  // Local optimistic state — keeps UI responsive and avoids flicker.
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [status, setStatus] = useState<TaskStatus>('todo');
   const [priority, setPriority] = useState<TaskPriority>('media');
-  const [dueDate, setDueDate] = useState('');
-  const [deadline, setDeadline] = useState('');
-  const [tags, setTags] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [type, setType] = useState<TaskType>('otro');
+  const [dueDate, setDueDate] = useState<string | null>(null);
+  const [deadline, setDeadline] = useState<string | null>(null);
+  const [tags, setTags] = useState<string[]>([]);
+
+  const [saveState, setSaveState] = useState<SaveState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [tab, setTab] = useState<'detail' | 'chat'>('detail');
+  const [sendingToCal, setSendingToCal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track current task id so async patches don't apply to a stale task.
+  const taskIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!task) return;
+    taskIdRef.current = task.id;
     setTitle(task.title);
     setDescription(task.description ?? '');
+    setStatus(task.status);
     setPriority(task.priority);
-    setDueDate(task.due_date ?? '');
-    setDeadline(task.deadline ?? '');
-    setTags((task.tags ?? []).join(', '));
+    setType(task.type);
+    setDueDate(task.due_date ?? null);
+    setDeadline(task.deadline ?? null);
+    setTags(task.tags ?? []);
     setError(null);
+    setInfo(null);
+    setSaveState('idle');
     setTab('detail');
+    // Cancel any pending text debounce from the previous task.
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
   }, [task]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   if (!task) return null;
 
@@ -57,67 +103,132 @@ export default function TaskDetailModal({
     : null;
   const subtasks = allTasks.filter((t) => t.parent_id === task.id);
 
-  const dirty =
-    title !== task.title ||
-    description !== (task.description ?? '') ||
-    priority !== task.priority ||
-    dueDate !== (task.due_date ?? '') ||
-    deadline !== (task.deadline ?? '') ||
-    tags !== (task.tags ?? []).join(', ');
+  function flashSaved() {
+    setSaveState('saved');
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => {
+      setSaveState((s) => (s === 'saved' ? 'idle' : s));
+    }, 1500);
+  }
 
-  const deadlineBeforeDue =
-    dueDate && deadline && deadline < dueDate
-      ? 'La fecha límite es anterior a la fecha programada.'
-      : null;
-
-  async function save() {
-    if (!task) return;
-    setSaving(true);
+  async function patchTask(partial: PatchPayload) {
+    const id = taskIdRef.current;
+    if (!id) return;
+    setSaveState('saving');
     setError(null);
     try {
-      const res = await fetch(`/api/tasks/${task.id}`, {
+      const res = await fetch(`/api/tasks/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim() || null,
-          priority,
-          due_date: dueDate || null,
-          deadline: deadline || null,
-          tags: tags
-            .split(',')
-            .map((t) => t.trim())
-            .filter(Boolean),
-        }),
+        body: JSON.stringify(partial),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Error al guardar');
       onUpdated(data as { task: Task; affected: Task[] });
       if (data.affected?.length) {
-        setInfo(
-          `${data.affected.length} subtarea(s) reagendadas para caber en la nueva fecha.`
-        );
-        setTimeout(onClose, 1800);
-      } else {
-        onClose();
+        setInfo(`${data.affected.length} subtarea(s) reagendadas para caber en la nueva fecha.`);
       }
+      flashSaved();
+    } catch (e) {
+      setError((e as Error).message);
+      setSaveState('idle');
+    }
+  }
+
+  // Text fields (title/description): debounced autosave.
+  function scheduleTextPatch(partial: PatchPayload) {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null;
+      patchTask(partial);
+    }, 800);
+  }
+
+  function flushTextPatch(partial: PatchPayload) {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    patchTask(partial);
+  }
+
+  function onTitleChange(value: string) {
+    setTitle(value);
+    scheduleTextPatch({ title: value.trim() });
+  }
+
+  function onTitleBlur() {
+    if (debounceRef.current) {
+      flushTextPatch({ title: title.trim() });
+    }
+  }
+
+  function onDescriptionChange(value: string) {
+    setDescription(value);
+    scheduleTextPatch({ description: value.trim() || null });
+  }
+
+  function onDescriptionBlur() {
+    if (debounceRef.current) {
+      flushTextPatch({ description: description.trim() || null });
+    }
+  }
+
+  // Discrete fields: immediate optimistic autosave.
+  function onStatusChange(v: TaskStatus) {
+    setStatus(v);
+    patchTask({ status: v });
+  }
+  function onPriorityChange(v: TaskPriority) {
+    setPriority(v);
+    patchTask({ priority: v });
+  }
+  function onTypeChange(v: TaskType) {
+    setType(v);
+    patchTask({ type: v });
+  }
+  function onDatesChange(start: string | null, end: string | null) {
+    setDueDate(start);
+    setDeadline(end);
+    patchTask({ due_date: start, deadline: end });
+  }
+  function onTagsChange(next: string[]) {
+    setTags(next);
+    patchTask({ tags: next });
+  }
+
+  async function sendToCalendar() {
+    if (!task) return;
+    if (!dueDate) {
+      setError('Define primero una fecha programada antes de enviar al calendario.');
+      return;
+    }
+    setSendingToCal(true);
+    setError(null);
+    setInfo(null);
+    try {
+      const res = await fetch(`/api/tasks/${task.id}/calendar`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Error al crear evento');
+      setInfo('Evento creado en Google Calendar. Abriendo…');
+      window.open(data.event.htmlLink, '_blank', 'noopener');
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setSaving(false);
+      setSendingToCal(false);
     }
   }
 
   async function remove() {
     if (!task) return;
     if (!confirm('¿Eliminar esta tarea?')) return;
-    setSaving(true);
+    setDeleting(true);
     try {
       await fetch(`/api/tasks/${task.id}`, { method: 'DELETE' });
       onDeleted(task.id);
       onClose();
     } finally {
-      setSaving(false);
+      setDeleting(false);
     }
   }
 
@@ -132,19 +243,18 @@ export default function TaskDetailModal({
       onClick={onClose}
     >
       <div
-        className="bg-[var(--bg)] border border-[var(--border)] w-full max-w-xl max-h-[90vh] flex flex-col"
+        className="bg-[var(--bg)] border border-[var(--border)] shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
           <div className="flex items-center gap-4">
-            <h2 className="font-semibold">Tarea</h2>
             <nav className="flex gap-1 text-sm">
               <button
                 onClick={() => setTab('detail')}
                 className={`px-3 py-1 ${
                   tab === 'detail'
-                    ? 'border-b-2 border-[var(--accent)] text-[var(--accent)]'
-                    : 'text-[var(--muted)] hover:text-white'
+                    ? 'border-b-2 border-[var(--text)] text-[var(--text)]'
+                    : 'text-[var(--muted)] hover:text-[var(--text)]'
                 }`}
               >
                 Detalle
@@ -153,185 +263,172 @@ export default function TaskDetailModal({
                 onClick={() => setTab('chat')}
                 className={`px-3 py-1 ${
                   tab === 'chat'
-                    ? 'border-b-2 border-[var(--accent)] text-[var(--accent)]'
-                    : 'text-[var(--muted)] hover:text-white'
+                    ? 'border-b-2 border-[var(--text)] text-[var(--text)]'
+                    : 'text-[var(--muted)] hover:text-[var(--text)]'
                 }`}
               >
                 💡 Chat
               </button>
             </nav>
           </div>
-          <button
-            onClick={onClose}
-            className="text-[var(--muted)] hover:text-[var(--danger)] text-xl leading-none"
-          >
-            ×
-          </button>
+          <div className="flex items-center gap-3">
+            {tab === 'detail' && saveState !== 'idle' && (
+              <span className="text-xs text-[var(--muted)]">
+                {saveState === 'saving' ? 'Guardando…' : 'Guardado'}
+              </span>
+            )}
+            <button
+              onClick={onClose}
+              className="text-[var(--muted)] hover:text-[var(--danger)] text-xl leading-none"
+            >
+              ×
+            </button>
+          </div>
         </header>
 
         {tab === 'chat' ? (
           <TaskChat taskId={task.id} />
         ) : (
-        <>
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {parent && (
-            <div className="bg-[var(--surface)] border-l-2 border-[var(--accent)] p-2">
-              <div className="text-[10px] mono text-[var(--muted)]">Subtarea de</div>
-              <button
-                onClick={() => onSelectTask(parent)}
-                className="text-sm text-[var(--accent)] hover:underline text-left"
-              >
-                ↑ {parent.title}
-              </button>
-            </div>
-          )}
-          <div>
-            <label className="text-xs mono text-[var(--muted)]">Título</label>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full mt-1 bg-[var(--surface)] border border-[var(--border)] px-3 py-2 outline-none focus:border-[var(--accent)]"
-            />
-          </div>
+          <>
+            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-1">
+              {parent && (
+                <button
+                  onClick={() => onSelectTask(parent)}
+                  className="text-xs text-[var(--accent)] hover:underline text-left mb-2 inline-flex items-center gap-1"
+                >
+                  <span className="text-[var(--muted)]">Subtarea de:</span> ↑ {parent.title}
+                </button>
+              )}
 
-          <div>
-            <label className="text-xs mono text-[var(--muted)]">Descripción</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={4}
-              className="w-full mt-1 bg-[var(--surface)] border border-[var(--border)] px-3 py-2 outline-none focus:border-[var(--accent)] resize-y"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs mono text-[var(--muted)]">Prioridad</label>
-              <select
-                value={priority}
-                onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                className="w-full mt-1 bg-[var(--surface)] border border-[var(--border)] px-2 py-2"
-              >
-                <option value="baja">Baja</option>
-                <option value="media">Media</option>
-                <option value="alta">Alta</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs mono text-[var(--muted)]">Programada para</label>
+              {/* Title */}
               <input
-                type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="w-full mt-1 bg-[var(--surface)] border border-[var(--border)] px-2 py-2"
+                value={title}
+                onChange={(e) => onTitleChange(e.target.value)}
+                onBlur={onTitleBlur}
+                placeholder="Sin título"
+                className="w-full bg-transparent text-2xl font-bold tracking-tight outline-none placeholder:text-[var(--muted)]"
               />
-            </div>
-          </div>
 
-          <div>
-            <label className="text-xs mono text-[var(--muted)]">
-              Fecha límite (deadline duro)
-            </label>
-            <input
-              type="date"
-              value={deadline}
-              onChange={(e) => setDeadline(e.target.value)}
-              className="w-full mt-1 bg-[var(--surface)] border border-[var(--border)] px-2 py-2"
-            />
-            {deadlineBeforeDue && (
-              <p className="text-xs mono text-[var(--danger)] mt-1">{deadlineBeforeDue}</p>
-            )}
-          </div>
+              {/* Properties */}
+              <div className="mt-4 space-y-0.5">
+                <div className="flex items-center gap-3 py-1">
+                  <span className="w-28 shrink-0 text-sm text-[var(--muted)] flex items-center gap-2">
+                    <span>📊</span> Estado
+                  </span>
+                  <StatusPill value={status} onChange={onStatusChange} />
+                </div>
 
-          <div>
-            <label className="text-xs mono text-[var(--muted)]">
-              Tags (separados por coma)
-            </label>
-            <input
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder="urgente, backend, ~2h"
-              className="w-full mt-1 bg-[var(--surface)] border border-[var(--border)] px-3 py-2 outline-none focus:border-[var(--accent)]"
-            />
-          </div>
+                <div className="flex items-center gap-3 py-1">
+                  <span className="w-28 shrink-0 text-sm text-[var(--muted)] flex items-center gap-2">
+                    <span>⚑</span> Prioridad
+                  </span>
+                  <PriorityPill value={priority} onChange={onPriorityChange} />
+                </div>
 
-          {subtasks.length > 0 && (
-            <div className="border-t border-[var(--border)] pt-3">
-              <div className="text-xs mono text-[var(--muted)] mb-2">
-                Subtareas ({subtasks.filter((s) => s.status === 'done').length}/{subtasks.length} hechas)
+                <div className="flex items-center gap-3 py-1">
+                  <span className="w-28 shrink-0 text-sm text-[var(--muted)] flex items-center gap-2">
+                    <span>🏷️</span> Tipo
+                  </span>
+                  <TypePill value={type} onChange={onTypeChange} />
+                </div>
+
+                <div className="flex items-center gap-3 py-1">
+                  <span className="w-28 shrink-0 text-sm text-[var(--muted)] flex items-center gap-2">
+                    <span>📅</span> Fechas
+                  </span>
+                  <DateRangeField start={dueDate} end={deadline} onChange={onDatesChange} />
+                </div>
+
+                <div className="flex items-start gap-3 py-1">
+                  <span className="w-28 shrink-0 text-sm text-[var(--muted)] flex items-center gap-2 pt-0.5">
+                    <span>#</span> Etiquetas
+                  </span>
+                  <div className="flex-1">
+                    <TagsMultiSelect value={tags} onChange={onTagsChange} />
+                  </div>
+                </div>
               </div>
-              <ul className="space-y-1">
-                {subtasks.map((s) => (
-                  <li key={s.id}>
-                    <button
-                      onClick={() => onSelectTask(s)}
-                      className="w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 bg-[var(--surface)] border-l-2 hover:bg-[var(--bg)] transition-colors"
-                      style={{
-                        borderColor:
-                          s.priority === 'alta'
-                            ? 'var(--danger)'
-                            : s.priority === 'media'
-                            ? 'var(--warn)'
-                            : 'var(--muted)',
-                      }}
-                    >
-                      <span
-                        className={`text-sm truncate ${
-                          s.status === 'done' ? 'line-through opacity-60' : ''
-                        }`}
-                      >
-                        ↳ {s.title}
-                      </span>
-                      <span className="mono text-[10px] text-[var(--muted)] shrink-0">
-                        {STATUS_LABEL[s.status]}
-                        {s.due_date ? ` · ${s.due_date}` : ''}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+
+              <div className="border-t border-[var(--border)] my-4" />
+
+              {/* Description body */}
+              <textarea
+                value={description}
+                onChange={(e) => onDescriptionChange(e.target.value)}
+                onBlur={onDescriptionBlur}
+                placeholder="Escribe algo…"
+                className="w-full bg-transparent outline-none resize-none text-sm leading-relaxed placeholder:text-[var(--muted)] min-h-[80px]"
+              />
+
+              {subtasks.length > 0 && (
+                <div className="border-t border-[var(--border)] pt-3 mt-2">
+                  <div className="text-xs mono text-[var(--muted)] mb-2">
+                    Subtareas ({subtasks.filter((s) => s.status === 'done').length}/{subtasks.length} hechas)
+                  </div>
+                  <ul className="space-y-1">
+                    {subtasks.map((s) => (
+                      <li key={s.id}>
+                        <button
+                          onClick={() => onSelectTask(s)}
+                          className="w-full text-left flex items-center justify-between gap-2 px-2 py-1.5 bg-[var(--surface)] border-l-2 hover:bg-[var(--surface-hover)] transition-colors"
+                          style={{
+                            borderColor:
+                              s.priority === 'alta'
+                                ? 'var(--danger)'
+                                : s.priority === 'media'
+                                ? 'var(--warn)'
+                                : 'var(--muted)',
+                          }}
+                        >
+                          <span
+                            className={`text-sm truncate ${
+                              s.status === 'done' ? 'line-through opacity-60' : ''
+                            }`}
+                          >
+                            ↳ {s.title}
+                          </span>
+                          <span className="mono text-[10px] text-[var(--muted)] shrink-0">
+                            {STATUS_LABEL[s.status]}
+                            {s.due_date ? ` · ${s.due_date}` : ''}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="text-xs mono text-[var(--muted)] space-y-1 pt-3 mt-2 border-t border-[var(--border)]">
+                <div>creada: {created}</div>
+                {completed && <div>completada: {completed}</div>}
+              </div>
+
+              {error && <div className="text-xs mono text-[var(--danger)] pt-1">{error}</div>}
+              {info && <div className="text-xs mono text-[var(--text)] pt-1">{info}</div>}
             </div>
-          )}
 
-          <div className="text-xs mono text-[var(--muted)] space-y-1 pt-2 border-t border-[var(--border)]">
-            <div>estado: {task.status}</div>
-            <div>creada: {created}</div>
-            {completed && <div>completada: {completed}</div>}
-          </div>
-
-          {error && (
-            <div className="text-xs mono text-[var(--danger)]">{error}</div>
-          )}
-          {info && (
-            <div className="text-xs mono text-[var(--accent)]">{info}</div>
-          )}
-        </div>
-
-        <footer className="flex justify-between gap-2 p-3 border-t border-[var(--border)]">
-          <button
-            onClick={remove}
-            disabled={saving}
-            className="text-[var(--danger)] hover:underline text-sm disabled:opacity-50"
-          >
-            Eliminar
-          </button>
-          <div className="flex gap-2">
-            <button
-              onClick={onClose}
-              className="border border-[var(--border)] px-4 py-1.5 text-sm hover:bg-[var(--surface)]"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={save}
-              disabled={saving || !dirty || !title.trim() || !!deadlineBeforeDue}
-              className="bg-[var(--accent)] hover:bg-[var(--accent-dim)] text-white px-4 py-1.5 text-sm disabled:opacity-50"
-            >
-              {saving ? 'Guardando…' : 'Guardar'}
-            </button>
-          </div>
-        </footer>
-        </>
+            <footer className="flex justify-between gap-2 p-3 border-t border-[var(--border)]">
+              <button
+                onClick={remove}
+                disabled={deleting}
+                className="text-[var(--danger)] hover:underline text-sm disabled:opacity-50"
+              >
+                Eliminar
+              </button>
+              <button
+                onClick={sendToCalendar}
+                disabled={sendingToCal || !dueDate}
+                title={
+                  dueDate
+                    ? 'Crea un evento en tu Google Calendar (puede generar duplicados si lo haces varias veces)'
+                    : 'Define una fecha programada primero'
+                }
+                className="border border-[var(--accent)] text-[var(--accent)] px-3 py-1.5 text-sm hover:bg-[var(--accent)] hover:text-white disabled:opacity-50"
+              >
+                {sendingToCal ? 'Enviando…' : '📅 A Calendar'}
+              </button>
+            </footer>
+          </>
         )}
       </div>
     </div>

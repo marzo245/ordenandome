@@ -202,7 +202,7 @@ export default function TaskCalendar({ tasks, onSelect, onMove }: Props) {
                 <li key={t.id}>
                   <button
                     onClick={() => onSelect(t)}
-                    className="w-full text-left text-sm flex justify-between gap-2 px-2 py-1.5 border-l-2 bg-[var(--surface)] hover:bg-[var(--accent)] hover:text-white transition-colors"
+                    className="w-full text-left text-sm flex justify-between gap-2 px-2 py-1.5 border-l-2 bg-[var(--surface)] hover:bg-[var(--surface-hover)] transition-colors"
                     style={{ borderColor: PRIORITY_COLOR[t.priority] }}
                   >
                     <span className="truncate">{t.title}</span>
@@ -261,12 +261,12 @@ function DayCell({
       ref={setNodeRef}
       className={`border-r border-b border-[var(--border)] min-h-[60px] sm:min-h-[88px] p-0.5 sm:p-1 text-[10px] sm:text-xs transition-colors ${
         inMonth ? '' : 'bg-[var(--surface)]/40 text-[var(--muted)]'
-      } ${isToday ? 'ring-1 ring-[var(--accent)] ring-inset' : ''} ${
-        isOver && !blocked ? 'bg-[var(--accent)]/15' : ''
+      } ${isToday ? 'ring-1 ring-[var(--text)] ring-inset' : ''} ${
+        isOver && !blocked ? 'bg-[var(--surface-hover)]' : ''
       } ${isOver && blocked ? 'bg-[var(--danger)]/20' : ''}`}
     >
       <div className="flex items-center justify-between">
-        <span className={`mono ${isToday ? 'text-[var(--accent)] font-bold' : ''}`}>
+        <span className={`mono ${isToday ? 'text-[var(--text)] font-bold' : ''}`}>
           {day}
         </span>
         {isDeadline && (
@@ -322,9 +322,9 @@ function DraggableChip({
         task.status === 'done'
           ? 'line-through opacity-50'
           : task.status === 'doing'
-          ? 'bg-[var(--accent)]/15'
+          ? 'bg-[var(--surface-hover)]'
           : 'bg-[var(--surface)]'
-      } hover:bg-[var(--accent)] hover:text-white transition-colors ${
+      } hover:bg-[var(--surface-hover)] transition-colors ${
         isDragging ? 'opacity-30' : ''
       }`}
       style={{ borderColor: PRIORITY_COLOR[task.priority] }}

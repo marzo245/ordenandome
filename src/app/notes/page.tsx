@@ -24,7 +24,7 @@ export default async function NotesPage() {
     <main className="max-w-6xl mx-auto px-3 sm:px-6 py-4 sm:py-8">
       <header className="mb-6 sm:mb-8 flex items-baseline justify-between gap-3 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-semibold">
-          Notas <span className="text-[var(--accent)]">Obsidian</span>
+          Notas <span className="text-[var(--muted)]">Obsidian</span>
         </h1>
         <Link href="/" className="mono text-xs sm:text-sm text-[var(--muted)] hover:underline">
           ← inicio

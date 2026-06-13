@@ -10,6 +10,7 @@ export interface TaskDraft {
   title: string;
   description: string | null;
   priority: 'baja' | 'media' | 'alta';
+  type: 'trabajo' | 'personal' | 'estudio' | 'otro';
   due_date: string | null;
   deadline: string | null;
   estimated_hours: number | null;
@@ -73,11 +74,20 @@ PRIORIDADES
 - "baja" si flexible.
 - "media" por defecto.
 
+TIPO (categoría de la tarea)
+- "trabajo": tareas profesionales, laborales, de cliente, reuniones de trabajo, código de un empleo.
+- "estudio": tareas académicas, cursos, exámenes, lecturas técnicas para aprender, proyectos universitarios.
+- "personal": recados, salud, familia, finanzas personales, ocio, vida diaria.
+- "otro": si no encaja claramente en las anteriores.
+Infiere el tipo del contexto. Ante la duda entre dos, elige el más probable; usa "otro" solo si es genuinamente ambiguo.
+
 FORMATO DE SALIDA FINAL — SIEMPRE JSON VÁLIDO sin texto fuera:
 
 {"action":"clarify","message":"..."}
-{"action":"propose","message":"...","draft":{"title":"...","description":"...","priority":"media","due_date":"2026-06-15","deadline":null,"estimated_hours":2}}
+{"action":"propose","message":"...","draft":{"title":"...","description":"...","priority":"media","type":"trabajo","due_date":"2026-06-15","deadline":null,"estimated_hours":2}}
 {"action":"propose_multi","message":"...","parent":{...},"subtasks":[...]}
+
+En propose_multi, parent y cada subtask incluyen los mismos campos del draft, incluido type.
 
 Si el usuario dice "sí"/"confirma" a un borrador previo: repite el último propose/propose_multi tal cual.`;
 
@@ -114,5 +124,26 @@ export async function planTask(
   ) {
     throw new Error(`Invalid action from LLM: ${(parsed as { action: string }).action}`);
   }
+
+  if (parsed.action === 'propose') {
+    normalizeDraftType(parsed.draft);
+  } else if (parsed.action === 'propose_multi') {
+    normalizeDraftType(parsed.parent);
+    parsed.subtasks.forEach(normalizeDraftType);
+  }
+
   return parsed;
+}
+
+const VALID_TYPES: ReadonlyArray<TaskDraft['type']> = [
+  'trabajo',
+  'personal',
+  'estudio',
+  'otro',
+];
+
+function normalizeDraftType(draft: TaskDraft): void {
+  if (!VALID_TYPES.includes(draft.type)) {
+    draft.type = 'otro';
+  }
 }

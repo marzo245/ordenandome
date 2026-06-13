@@ -15,15 +15,17 @@ export default async function NotesPreview() {
     .limit(6);
 
   return (
-    <div className="border border-[var(--border)] bg-[var(--surface)]">
-      <div className="flex justify-between items-center px-4 py-2 border-b border-[var(--border)]">
-        <h2 className="text-sm font-semibold">Notas</h2>
-        <a href="/notes" className="mono text-xs text-[var(--accent)] hover:underline">
-          abrir todas →
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-[11px] uppercase tracking-wider text-[var(--muted)] font-medium">
+          Notas recientes
+        </h2>
+        <a href="/notes" className="text-xs text-[var(--muted)] hover:text-[var(--text)]">
+          abrir todas
         </a>
       </div>
       {recent.length === 0 ? (
-        <div className="p-4 text-xs text-[var(--muted)]">
+        <div className="text-xs text-[var(--muted)]">
           Sin notas aún.{' '}
           <a href="/notes" className="text-[var(--accent)] hover:underline">
             Sincroniza tu vault
@@ -31,22 +33,24 @@ export default async function NotesPreview() {
           .
         </div>
       ) : (
-        <ul className="divide-y divide-[var(--border)]">
+        <ul className="divide-y divide-[var(--border)]/40">
           {recent.map((n) => {
             const enc = n.path.split('/').map(encodeURIComponent).join('/');
             return (
               <li key={n.path}>
                 <a
                   href={`/notes?open=${enc}`}
-                  className="block px-4 py-2 hover:bg-[var(--bg)]"
+                  className="block py-2.5 group"
                 >
                   <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-sm truncate">{n.title}</span>
-                    <span className="mono text-[10px] text-[var(--muted)] shrink-0">
+                    <span className="text-sm truncate group-hover:underline">
+                      {n.title}
+                    </span>
+                    <span className="text-xs text-[var(--muted)] shrink-0">
                       {n.scope}
                     </span>
                   </div>
-                  <div className="mono text-[10px] text-[var(--muted)] truncate">
+                  <div className="text-xs text-[var(--muted)] truncate">
                     {n.folder || '/'}
                   </div>
                 </a>
@@ -55,6 +59,6 @@ export default async function NotesPreview() {
           })}
         </ul>
       )}
-    </div>
+    </section>
   );
 }

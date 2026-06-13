@@ -1,5 +1,6 @@
 export type TaskStatus = 'todo' | 'doing' | 'done';
 export type TaskPriority = 'baja' | 'media' | 'alta';
+export type TaskType = 'trabajo' | 'personal' | 'estudio' | 'otro';
 
 export interface Task {
   id: string;
@@ -7,6 +8,7 @@ export interface Task {
   description: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  type: TaskType;
   due_date: string | null;
   deadline: string | null;
   tags: string[] | null;
@@ -14,6 +16,7 @@ export interface Task {
   source_note_path: string | null;
   source_line: number | null;
   source_fingerprint: string | null;
+  google_event_id: string | null;
   created_at: string | Date;
   completed_at: string | Date | null;
 }

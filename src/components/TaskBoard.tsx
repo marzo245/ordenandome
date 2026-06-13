@@ -13,7 +13,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import type { Task, TaskPriority, TaskStatus } from '@/lib/types';
+import type { Task, TaskPriority, TaskStatus, TaskType } from '@/lib/types';
 import TaskPlannerModal from './TaskPlannerModal';
 import TaskDetailModal from './TaskDetailModal';
 import TaskCalendar from './TaskCalendar';
@@ -30,12 +30,28 @@ const PRIORITY_COLOR: Record<TaskPriority, string> = {
   baja: 'var(--muted)',
 };
 
+const TYPE_STYLE: Record<TaskType, { bg: string; text: string; label: string }> = {
+  trabajo:  { bg: '#d3e5ef', text: '#183347', label: 'Trabajo' },
+  personal: { bg: '#e8deee', text: '#412454', label: 'Personal' },
+  estudio:  { bg: '#fadec9', text: '#49290e', label: 'Estudio' },
+  otro:     { bg: '#e9e9e7', text: '#37352f', label: 'Otro' },
+};
+
+const TYPE_FILTERS: { key: TaskType | 'todos'; label: string }[] = [
+  { key: 'todos', label: 'Todos' },
+  { key: 'trabajo', label: 'Trabajo' },
+  { key: 'personal', label: 'Personal' },
+  { key: 'estudio', label: 'Estudio' },
+  { key: 'otro', label: 'Otro' },
+];
+
 export default function TaskBoard({ initial }: { initial: Task[] }) {
   const [tasks, setTasks] = useState<Task[]>(initial);
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [view, setView] = useState<'board' | 'calendar'>('board');
+  const [typeFilter, setTypeFilter] = useState<TaskType | 'todos'>('todos');
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
@@ -117,18 +133,13 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
 
   const hasNoteTasks = tasks.some((t) => t.source_note_path);
 
+  const visibleTasks =
+    typeFilter === 'todos' ? tasks : tasks.filter((t) => t.type === typeFilter);
+
   return (
     <section>
-      <div className="flex mb-4 sm:mb-6 gap-2">
-        <button
-          onClick={() => setPlannerOpen(true)}
-          className="flex-1 bg-[var(--accent)] hover:bg-[var(--accent-dim)] px-4 py-2 font-medium text-white flex items-center justify-center gap-2"
-          title="Describe la tarea en lenguaje natural y la IA la planea"
-        >
-          <span>✨</span>
-          <span>Nueva tarea con IA</span>
-        </button>
-        {hasNoteTasks && (
+      {hasNoteTasks && (
+        <div className="flex mb-4 sm:mb-6">
           <button
             onClick={purgeFromNotes}
             className="mono text-xs px-3 py-2 border border-[var(--danger)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white"
@@ -136,8 +147,18 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
           >
             🧹 limpiar importadas
           </button>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Botón flotante que levita: nueva tarea con IA (primario) */}
+      <button
+        onClick={() => setPlannerOpen(true)}
+        title="Nueva tarea con IA"
+        aria-label="Nueva tarea con IA"
+        className="fixed bottom-6 right-44 z-40 w-14 h-14 rounded-full bg-[var(--accent)] hover:bg-[var(--accent-dim)] text-white shadow-lg flex items-center justify-center text-2xl transition-shadow hover:shadow-xl animate-[levitate_3s_ease-in-out_infinite]"
+      >
+        ✨
+      </button>
 
       <TaskPlannerModal
         open={plannerOpen}
@@ -145,13 +166,32 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
         onCreated={(created) => setTasks((t) => [...created, ...t])}
       />
 
+      <div className="flex items-center flex-wrap gap-1 mb-4">
+        {TYPE_FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setTypeFilter(f.key)}
+            className={`px-2.5 py-1 rounded text-xs cursor-pointer ${
+              typeFilter === f.key
+                ? 'bg-[var(--surface-hover)] text-[var(--text)] font-medium'
+                : 'text-[var(--muted)] hover:text-[var(--text)]'
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+        <span className="ml-1 text-xs text-[var(--muted)]">
+          {visibleTasks.length} tareas
+        </span>
+      </div>
+
       <nav className="flex gap-1 mb-4 border-b border-[var(--border)]">
         <button
           onClick={() => setView('board')}
           className={`px-4 py-2 text-sm -mb-px border-b-2 ${
             view === 'board'
-              ? 'border-[var(--accent)] text-[var(--accent)]'
-              : 'border-transparent text-[var(--muted)] hover:text-white'
+              ? 'border-[var(--text)] text-[var(--text)]'
+              : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]'
           }`}
         >
           Tablero
@@ -160,8 +200,8 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
           onClick={() => setView('calendar')}
           className={`px-4 py-2 text-sm -mb-px border-b-2 ${
             view === 'calendar'
-              ? 'border-[var(--accent)] text-[var(--accent)]'
-              : 'border-transparent text-[var(--muted)] hover:text-white'
+              ? 'border-[var(--text)] text-[var(--text)]'
+              : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]'
           }`}
         >
           Calendario
@@ -176,7 +216,7 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
                 key={col.key}
                 status={col.key}
                 label={col.label}
-                tasks={tasks.filter((t) => t.status === col.key)}
+                tasks={visibleTasks.filter((t) => t.status === col.key)}
                 allTasks={tasks}
                 onRemove={remove}
                 onSelect={setSelectedTask}
@@ -188,7 +228,7 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
           </DragOverlay>
         </DndContext>
       ) : (
-        <TaskCalendar tasks={tasks} onSelect={setSelectedTask} onMove={moveDueDate} />
+        <TaskCalendar tasks={visibleTasks} onSelect={setSelectedTask} onMove={moveDueDate} />
       )}
 
       <TaskDetailModal
@@ -232,7 +272,7 @@ function Column({
       <div
         ref={setNodeRef}
         className={`p-2 space-y-2 min-h-[120px] transition-colors ${
-          isOver ? 'bg-[var(--accent-dim)]/20' : ''
+          isOver ? 'bg-[var(--surface-hover)]' : ''
         }`}
       >
         {ordered.map((t) => {
@@ -329,7 +369,7 @@ function Card({
     >
       {parent && !parentInSameColumn && (
         <div className="text-[10px] mono text-[var(--muted)] truncate mb-0.5">
-          de: <span className="text-[var(--accent)]">{parent.title}</span>
+          de: <span className="text-[var(--text)]">{parent.title}</span>
         </div>
       )}
       <div className="flex justify-between items-start gap-2">
@@ -356,8 +396,20 @@ function Card({
           </button>
         )}
       </div>
-      {task.due_date && (
-        <span className="mono text-xs text-[var(--muted)]">{task.due_date}</span>
+      {(task.due_date || task.type !== 'otro') && (
+        <div className="flex items-center gap-2 mt-0.5">
+          {task.due_date && (
+            <span className="mono text-xs text-[var(--muted)]">{task.due_date}</span>
+          )}
+          {task.type !== 'otro' && (
+            <span
+              className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium"
+              style={{ background: TYPE_STYLE[task.type].bg, color: TYPE_STYLE[task.type].text }}
+            >
+              {TYPE_STYLE[task.type].label}
+            </span>
+          )}
+        </div>
       )}
     </article>
   );

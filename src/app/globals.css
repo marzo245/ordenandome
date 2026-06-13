@@ -3,15 +3,17 @@
 @tailwind utilities;
 
 :root {
-  --bg: #0a0e12;
-  --surface: #11171d;
-  --border: #1f2933;
-  --text: #e4e9ed;
-  --muted: #8a97a3;
-  --accent: #1d9e75;
-  --accent-dim: #15795a;
-  --danger: #c0392b;
-  --warn: #d98c1f;
+  --bg: #ffffff;
+  --surface: #f7f6f3;        /* gris muy claro Notion */
+  --surface-hover: #efeeec;  /* hover sobre surface */
+  --text: #37352f;           /* casi negro Notion */
+  --muted: #787774;          /* gris medio Notion */
+  --border: #ebebea;         /* hairline */
+  --border-soft: rgba(55,53,47,0.09);
+  --accent: #2383e2;         /* azul Notion (lo dejamos definido pero apenas se usa) */
+  --accent-dim: #1f6fc4;
+  --danger: #e03e3e;
+  --warn: #d9730d;
 }
 
 html, body {
@@ -23,3 +25,16 @@ html, body {
 code, .mono { font-family: var(--font-plex-mono), monospace; }
 
 ::selection { background: var(--accent); color: #fff; }
+
+body { -webkit-font-smoothing: antialiased; }
+h1, h2 { letter-spacing: -0.01em; }
+
+@keyframes levitate {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-8px); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tasks } from '@/db';
-import { desc, sql } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
+import { createCalendarEventFromTask } from '@/lib/google-calendar';
 
 export async function GET() {
   try {
@@ -16,7 +17,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { title, description, priority, due_date, deadline, tags, parent_id } = body;
+  const { title, description, priority, type, due_date, deadline, tags, parent_id } = body;
 
   if (!title?.trim()) {
     return NextResponse.json({ error: 'title requerido' }, { status: 400 });
@@ -25,8 +26,25 @@ export async function POST(req: NextRequest) {
   try {
     const [row] = await db
       .insert(tasks)
-      .values({ title, description, priority, due_date, deadline, tags, parent_id })
+      .values({ title, description, priority, type, due_date, deadline, tags, parent_id })
       .returning();
+
+    if (row.due_date) {
+      try {
+        const event = await createCalendarEventFromTask({
+          ...row,
+          tags: row.tags ?? null,
+        });
+        const [updated] = await db
+          .update(tasks)
+          .set({ google_event_id: event.id })
+          .where(eq(tasks.id, row.id))
+          .returning();
+        return NextResponse.json(updated, { status: 201 });
+      } catch (calErr) {
+        console.error('[calendar sync] failed:', (calErr as Error).message);
+      }
+    }
     return NextResponse.json(row, { status: 201 });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

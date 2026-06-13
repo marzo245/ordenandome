@@ -74,12 +74,20 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
     for (const f of files) uploadImage(f);
   }
 
+  // Al cerrar NO borramos el estado: así, si cierras sin querer (click fuera),
+  // se conserva lo que escribiste y la conversación. Se limpia solo tras crear
+  // la tarea con éxito o con el botón "nueva conversación".
+  function resetConversation() {
+    setMessages([]);
+    setProposal(null);
+    setInput('');
+    setError(null);
+  }
+
+  // Enfoca el textarea al abrir (el componente permanece montado entre aperturas).
   useEffect(() => {
-    if (!open) {
-      setMessages([]);
-      setProposal(null);
-      setInput('');
-      setError(null);
+    if (open) {
+      requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
 
@@ -126,6 +134,7 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
       title: d.title,
       description: d.description,
       priority: d.priority,
+      type: d.type,
       due_date: d.due_date,
       deadline: d.deadline,
       parent_id,
@@ -160,6 +169,7 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
         }
         onCreated([parent, ...subs]);
       }
+      resetConversation();
       onClose();
     } catch (e) {
       setError((e as Error).message);
@@ -176,17 +186,30 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
       onClick={onClose}
     >
       <div
-        className="bg-[var(--bg)] border border-[var(--border)] w-full max-w-2xl max-h-[85vh] flex flex-col"
+        className="bg-[var(--bg)] border border-[var(--border)] shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
           <h2 className="font-semibold">Planear tarea con IA</h2>
-          <button
-            onClick={onClose}
-            className="text-[var(--muted)] hover:text-[var(--danger)]"
-          >
-            ×
-          </button>
+          <div className="flex items-center gap-3">
+            {messages.length > 0 && (
+              <button
+                onClick={resetConversation}
+                disabled={loading}
+                className="text-xs text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-50"
+                title="Descartar esta conversación y empezar de cero"
+              >
+                nueva conversación
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="text-[var(--muted)] hover:text-[var(--danger)]"
+              title="Cerrar (se conserva lo escrito)"
+            >
+              ×
+            </button>
+          </div>
         </header>
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -229,7 +252,7 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
                   label={`Tarea principal (con ${proposal.subtasks.length} subtareas)`}
                   draft={proposal.parent}
                 />
-                <div className="pl-3 border-l-2 border-[var(--accent)] space-y-2">
+                <div className="pl-3 border-l-2 border-[var(--border)] space-y-2">
                   {proposal.subtasks.map((s, i) => (
                     <DraftPreview key={i} label={`↳ Subtarea ${i + 1}`} draft={s} compact />
                   ))}
@@ -262,7 +285,7 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
               type="button"
               onClick={() => fileRef.current?.click()}
               disabled={uploading || loading}
-              className="mono text-xs px-2 py-1 border border-[var(--border)] text-[var(--accent)] hover:underline disabled:opacity-50"
+              className="mono text-xs px-2 py-1 border border-[var(--border)] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
               title="Adjuntar imagen"
             >
               {uploading ? 'subiendo…' : '🖼️ imagen'}
