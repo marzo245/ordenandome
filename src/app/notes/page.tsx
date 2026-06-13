@@ -1,5 +1,6 @@
 import { db, notes_cache } from '@/db';
 import { desc } from 'drizzle-orm';
+import Link from 'next/link';
 import NotesBrowser from '@/components/NotesBrowser';
 
 export const dynamic = 'force-dynamic';
@@ -25,9 +26,9 @@ export default async function NotesPage() {
         <h1 className="text-xl sm:text-2xl font-semibold">
           Notas <span className="text-[var(--accent)]">Obsidian</span>
         </h1>
-        <a href="/" className="mono text-xs sm:text-sm text-[var(--muted)] hover:underline">
+        <Link href="/" className="mono text-xs sm:text-sm text-[var(--muted)] hover:underline">
           ← inicio
-        </a>
+        </Link>
       </header>
       <NotesBrowser initial={rows} />
     </main>
