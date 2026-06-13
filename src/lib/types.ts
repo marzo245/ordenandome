@@ -11,6 +11,9 @@ export interface Task {
   deadline: string | null;
   tags: string[] | null;
   parent_id: string | null;
+  source_note_path: string | null;
+  source_line: number | null;
+  source_fingerprint: string | null;
   created_at: string | Date;
   completed_at: string | Date | null;
 }

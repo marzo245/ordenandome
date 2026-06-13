@@ -1,7 +1,7 @@
 import type { Task, GithubActivityRow as GitHubActivity } from '@/db';
 import type { NewsItem } from './news';
-
-const MODEL = process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile';
+import { runAgent } from './ai-agent';
+import { buildVaultMap } from './vault-context';
 
 interface SummaryInput {
   day: string;
@@ -59,23 +59,17 @@ export async function generateSummary(input: SummaryInput): Promise<string> {
     })),
   });
 
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0.4,
-      messages: [
-        { role: 'system', content: SYSTEM },
-        { role: 'user', content: userPrompt },
-      ],
-    }),
-  });
+  const vaultMap = await buildVaultMap().catch(() => '');
+  const systemWithVault = vaultMap
+    ? `${SYSTEM}\n\n## Vault del usuario (úsalo SOLO si necesitas conectar tareas/noticias con proyectos)\n\n${vaultMap}\n\nPuedes usar search_vault si una noticia podría relacionarse con un proyecto específico y quieres validar.`
+    : SYSTEM;
 
-  if (!res.ok) throw new Error(`Groq error: ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  return data.choices[0].message.content as string;
+  const result = await runAgent({
+    system: systemWithVault,
+    messages: [{ role: 'user', content: userPrompt }],
+    temperature: 0.4,
+    tools: !!vaultMap,
+    maxToolHops: 2,
+  });
+  return result.content;
 }

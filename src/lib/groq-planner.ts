@@ -1,6 +1,5 @@
 import type { Task } from '@/db';
-
-const MODEL = process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile';
+import { runAgent } from './ai-agent';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -21,56 +20,71 @@ export type PlannerResult =
   | { action: 'propose'; message: string; draft: TaskDraft }
   | { action: 'propose_multi'; message: string; parent: TaskDraft; subtasks: TaskDraft[] };
 
-const SYSTEM = (today: string, tasksJson: string) => `Eres un asistente que ayuda a planear tareas. Hablas en español, directo y breve.
+const SYSTEM = (today: string, tasksJson: string, vaultMap: string) => `Eres un asistente que ayuda a planear tareas. Hablas en español, directo y breve.
 
 CONTEXTO
+
 Hoy es ${today}.
-Tareas existentes del usuario (formato JSON: title, status, priority, due_date, deadline):
+
+## Mapa general del vault Obsidian del usuario (grounding)
+
+${vaultMap}
+
+## Tareas existentes
 ${tasksJson}
 
+## Herramientas disponibles
+
+Tienes herramientas para consultar el vault SOLO cuando lo necesites (evita gastarlas si la tarea es trivial):
+- search_vault(query) — busca notas por palabras clave
+- read_note(path) — lee una nota completa
+- list_active_projects() — proyectos en 01-Proyectos/
+- list_tasks() — tareas activas detalladas
+
+Usa estas herramientas si:
+- La tarea menciona algo que podría ser un proyecto, área o tema documentado.
+- Necesitas decidir si encaja en un proyecto existente o crear uno nuevo.
+- Quieres validar si duplica algo del vault.
+
+NO las uses si la tarea es trivial ("llamar al dentista") o si ya tienes contexto suficiente.
+
+REGLAS PARA USAR EL VAULT
+- Si la tarea encaja en un proyecto existente: menciónalo en \`description\` con wikilink \`[[Nombre exacto]]\`.
+- Si encaja en un área: añade un tag derivado del nombre del área.
+- NO inventes wikilinks que no existan (valida con search_vault primero).
+
 TU TRABAJO
-Conversas con el usuario para crear una tarea. Debes decidir entre tres acciones:
 
-1. action="clarify" — si la descripción es ambigua y falta contexto crítico. Pide UNA aclaración.
+Conversas con el usuario para crear una tarea. Decides entre tres acciones:
 
-2. action="propose" — si entiendes la tarea y NO es demasiado grande (estimated_hours <= 4 y un solo paso lógico).
-   Devuelves un solo draft con: title (corto, imperativo, máx 60 chars), description, priority, due_date, deadline, estimated_hours.
-
-3. action="propose_multi" — SI la tarea es claramente grande o multi-etapa:
-     - estimated_hours total > 4, O
-     - el usuario describe varios pasos distintos ("hacer X, luego Y, luego Z"), O
-     - es un entregable complejo (proyecto, informe largo, refactor, etc.).
-   Devuelves:
-     - parent: el draft general (la "tarea grande") con descripción + due_date + deadline + estimated_hours total.
-     - subtasks: array de 2 a 6 drafts concretos y accionables, en orden lógico. Cada uno con su title, description, priority, due_date (escalonadas dentro de la ventana), deadline (puede heredar del padre o null), estimated_hours.
+1. action="clarify" — descripción ambigua. Pide UNA aclaración.
+2. action="propose" — entendiste y NO es grande (estimated_hours <= 4, un solo paso).
+3. action="propose_multi" — grande o multi-etapa (>4h, varios pasos, entregable complejo).
+   - parent: draft general
+   - subtasks: 2-6 drafts concretos, en orden lógico
 
 REGLAS DE FECHAS
-- due_date: formato YYYY-MM-DD. Cuándo planeas hacerla.
-  * Si usuario dio fecha, úsala.
-  * Si pide que tú decidas, mira tareas existentes y escalona realistamente.
-  * Debe ser <= deadline.
-- deadline: formato YYYY-MM-DD. Fecha límite INMOVIBLE. Solo cuando el usuario menciona explícitamente una entrega real ("vence el 20", "examen el viernes").
-- Para subtareas: distribuye los due_date en la ventana entre hoy y la fecha del padre.
+- due_date YYYY-MM-DD: cuándo planeas hacerla. <= deadline.
+- deadline YYYY-MM-DD: solo si el usuario menciona entrega real ("vence el 20").
+- Subtareas: escalonadas entre hoy y due_date del padre.
 
 PRIORIDADES
-- "alta" si vence ≤2 días o el usuario muestra urgencia.
-- "baja" si es flexible.
+- "alta" si ≤2 días o el usuario urge.
+- "baja" si flexible.
 - "media" por defecto.
-- Subtareas: heredan la prioridad del padre salvo que sean claramente menos críticas.
 
-FORMATO DE SALIDA — SIEMPRE JSON VÁLIDO, sin texto fuera:
+FORMATO DE SALIDA FINAL — SIEMPRE JSON VÁLIDO sin texto fuera:
 
-  {"action":"clarify","message":"..."}
+{"action":"clarify","message":"..."}
+{"action":"propose","message":"...","draft":{"title":"...","description":"...","priority":"media","due_date":"2026-06-15","deadline":null,"estimated_hours":2}}
+{"action":"propose_multi","message":"...","parent":{...},"subtasks":[...]}
 
-  {"action":"propose","message":"resumen humano","draft":{"title":"...","description":"...","priority":"media","due_date":"2026-06-15","deadline":null,"estimated_hours":2}}
-
-  {"action":"propose_multi","message":"explica por qué la divides y resume el plan","parent":{"title":"...","description":"resumen general","priority":"alta","due_date":"2026-06-30","deadline":"2026-06-30","estimated_hours":12},"subtasks":[{"title":"...","description":"...","priority":"alta","due_date":"2026-06-15","deadline":null,"estimated_hours":3},...]}
-
-NUNCA inventes datos. Si el usuario responde "sí", "confirma" a un borrador previo, repite el último propose/propose_multi tal cual — el frontend crea cuando el usuario hace clic.`;
+Si el usuario dice "sí"/"confirma" a un borrador previo: repite el último propose/propose_multi tal cual.`;
 
 export async function planTask(
   messages: ChatMessage[],
-  tasks: Task[]
+  tasks: Task[],
+  vaultMap: string
 ): Promise<PlannerResult> {
   const today = new Date().toISOString().slice(0, 10);
   const tasksSummary = tasks
@@ -83,28 +97,16 @@ export async function planTask(
       deadline: t.deadline,
     }));
 
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0.3,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM(today, JSON.stringify(tasksSummary)) },
-        ...messages,
-      ],
-    }),
+  const result = await runAgent({
+    system: SYSTEM(today, JSON.stringify(tasksSummary), vaultMap),
+    messages,
+    temperature: 0.3,
+    responseFormat: 'json_object',
+    tools: true,
+    maxToolHops: 4,
   });
 
-  if (!res.ok) throw new Error(`Groq error: ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  const raw = data.choices[0].message.content as string;
-
-  const parsed = JSON.parse(raw) as PlannerResult;
+  const parsed = JSON.parse(result.content) as PlannerResult;
   if (
     parsed.action !== 'clarify' &&
     parsed.action !== 'propose' &&

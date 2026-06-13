@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tasks } from '@/db';
 import { planTask, type ChatMessage } from '@/lib/groq-planner';
+import { buildVaultMap } from '@/lib/vault-context';
+
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,9 +13,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'messages requerido' }, { status: 400 });
     }
 
-    const currentTasks = await db.select().from(tasks);
-    const result = await planTask(messages, currentTasks);
+    const [currentTasks, vaultMap] = await Promise.all([
+      db.select().from(tasks),
+      buildVaultMap(),
+    ]);
 
+    const result = await planTask(messages, currentTasks, vaultMap);
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });

@@ -20,7 +20,59 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  function insertAtCursor(text: string) {
+    const el = inputRef.current;
+    if (!el) {
+      setInput((v) => v + text);
+      return;
+    }
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    setInput((v) => v.slice(0, start) + text + v.slice(end));
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + text.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
+
+  async function uploadImage(file: File) {
+    setUploading(true);
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/notes/upload-image', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'upload failed');
+      insertAtCursor(`![${data.alt || 'imagen'}](${data.url})\n`);
+    } catch (e) {
+      setError(`Imagen: ${(e as Error).message}`);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const img = Array.from(e.clipboardData.items).find((it) => it.type.startsWith('image/'));
+    if (!img) return;
+    const f = img.getAsFile();
+    if (!f) return;
+    e.preventDefault();
+    uploadImage(f);
+  }
+
+  function onDrop(e: React.DragEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    for (const f of files) uploadImage(f);
+  }
 
   useEffect(() => {
     if (!open) {
@@ -204,23 +256,60 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
           </div>
         )}
 
-        <div className="border-t border-[var(--border)] p-3 flex gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && send()}
-            placeholder={proposal ? 'Pide cambios o confirma…' : 'Describe la tarea…'}
-            disabled={loading}
-            className="flex-1 bg-[var(--surface)] border border-[var(--border)] px-3 py-2 outline-none focus:border-[var(--accent)] disabled:opacity-50"
-            autoFocus
-          />
-          <button
-            onClick={send}
-            disabled={loading || !input.trim()}
-            className="bg-[var(--accent)] hover:bg-[var(--accent-dim)] text-white px-4 disabled:opacity-50"
-          >
-            Enviar
-          </button>
+        <div className="border-t border-[var(--border)] p-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading || loading}
+              className="mono text-xs px-2 py-1 border border-[var(--border)] text-[var(--accent)] hover:underline disabled:opacity-50"
+              title="Adjuntar imagen"
+            >
+              {uploading ? 'subiendo…' : '🖼️ imagen'}
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) uploadImage(f);
+                e.target.value = '';
+              }}
+            />
+            <span className="mono text-[10px] text-[var(--muted)]">
+              pega o arrastra screenshots; la IA verá la URL
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onPaste={onPaste}
+              onDrop={onDrop}
+              onDragOver={(e) => e.preventDefault()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              placeholder={proposal ? 'Pide cambios o confirma… (⌘/Ctrl+Enter)' : 'Describe la tarea… (⌘/Ctrl+Enter)'}
+              disabled={loading}
+              rows={3}
+              className="flex-1 bg-[var(--surface)] border border-[var(--border)] px-3 py-2 outline-none focus:border-[var(--accent)] disabled:opacity-50 resize-y text-sm"
+              autoFocus
+            />
+            <button
+              onClick={send}
+              disabled={loading || !input.trim()}
+              className="bg-[var(--accent)] hover:bg-[var(--accent-dim)] text-white px-4 disabled:opacity-50 self-stretch"
+            >
+              Enviar
+            </button>
+          </div>
         </div>
       </div>
     </div>

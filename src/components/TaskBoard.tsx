@@ -32,9 +32,6 @@ const PRIORITY_COLOR: Record<TaskPriority, string> = {
 
 export default function TaskBoard({ initial }: { initial: Task[] }) {
   const [tasks, setTasks] = useState<Task[]>(initial);
-  const [title, setTitle] = useState('');
-  const [priority, setPriority] = useState<TaskPriority>('media');
-  const [due, setDue] = useState('');
   const [plannerOpen, setPlannerOpen] = useState(false);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -44,19 +41,6 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 6 } })
   );
-
-  async function addTask() {
-    if (!title.trim()) return;
-    const res = await fetch('/api/tasks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, priority, due_date: due || null }),
-    });
-    const task = await res.json();
-    setTasks((t) => [task, ...t]);
-    setTitle('');
-    setDue('');
-  }
 
   async function moveDueDate(task: Task, newDate: string) {
     setTasks((t) => t.map((x) => (x.id === task.id ? { ...x, due_date: newDate } : x)));
@@ -119,44 +103,40 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
     persistStatus(task, overId);
   }
 
+  async function purgeFromNotes() {
+    if (!confirm('Borrar todas las tareas auto-importadas desde notas? Las que creaste con ✨ IA o a mano se conservan.')) return;
+    const res = await fetch('/api/tasks/purge-from-notes', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(`Error: ${data.error}`);
+      return;
+    }
+    setTasks((t) => t.filter((x) => !x.source_note_path));
+    alert(`Borradas ${data.deleted} tareas importadas de notas.`);
+  }
+
+  const hasNoteTasks = tasks.some((t) => t.source_note_path);
+
   return (
     <section>
-      <div className="flex flex-wrap gap-2 mb-4 sm:mb-6">
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && addTask()}
-          placeholder="Nueva tarea…"
-          className="flex-1 min-w-full sm:min-w-0 bg-[var(--surface)] border border-[var(--border)] px-3 py-2 outline-none focus:border-[var(--accent)]"
-        />
-        <select
-          value={priority}
-          onChange={(e) => setPriority(e.target.value as TaskPriority)}
-          className="bg-[var(--surface)] border border-[var(--border)] px-2 py-2 flex-1 sm:flex-none"
-        >
-          <option value="baja">Baja</option>
-          <option value="media">Media</option>
-          <option value="alta">Alta</option>
-        </select>
-        <input
-          type="date"
-          value={due}
-          onChange={(e) => setDue(e.target.value)}
-          className="bg-[var(--surface)] border border-[var(--border)] px-2 py-2 flex-1 sm:flex-none"
-        />
-        <button
-          onClick={addTask}
-          className="bg-[var(--accent)] hover:bg-[var(--accent-dim)] px-4 py-2 font-medium text-white flex-1 sm:flex-none"
-        >
-          Agregar
-        </button>
+      <div className="flex mb-4 sm:mb-6 gap-2">
         <button
           onClick={() => setPlannerOpen(true)}
-          className="border border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white px-4 py-2 font-medium flex-1 sm:flex-none"
-          title="Describe la tarea en lenguaje natural y la IA te ayuda a planearla"
+          className="flex-1 bg-[var(--accent)] hover:bg-[var(--accent-dim)] px-4 py-2 font-medium text-white flex items-center justify-center gap-2"
+          title="Describe la tarea en lenguaje natural y la IA la planea"
         >
-          ✨ IA
+          <span>✨</span>
+          <span>Nueva tarea con IA</span>
         </button>
+        {hasNoteTasks && (
+          <button
+            onClick={purgeFromNotes}
+            className="mono text-xs px-3 py-2 border border-[var(--danger)] text-[var(--danger)] hover:bg-[var(--danger)] hover:text-white"
+            title="Borrar las tareas que se auto-importaron desde checkboxes de notas"
+          >
+            🧹 limpiar importadas
+          </button>
+        )}
       </div>
 
       <TaskPlannerModal
