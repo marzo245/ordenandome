@@ -80,6 +80,7 @@ export default function SistemasAiChat({
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<SistemaAiResult | null>(null);
   const [attachments, setAttachments] = useState<string[]>([]);
+  const [keepImages, setKeepImages] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -215,14 +216,47 @@ export default function SistemasAiChat({
     };
   }
 
-  async function createFrom(body: object) {
+  // ¿Hubo capturas en la conversación? (para ofrecer conservarlas en la doc)
+  const hasConversationImages = messages.some((m) => m.images && m.images.length > 0);
+
+  function conversationImages(): string[] {
+    return messages.flatMap((m) => m.images ?? []);
+  }
+
+  // Sube un data URL al host de imágenes y devuelve la URL pública.
+  async function uploadDataUrl(dataUrl: string, i: number): Promise<string> {
+    const blob = await (await fetch(dataUrl)).blob();
+    const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    const file = new File([blob], `captura-${i + 1}.${ext}`, { type: blob.type });
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/notes/upload-image', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok || !data.url) {
+      throw new Error((data as { error?: string }).error ?? 'No se pudo subir la captura');
+    }
+    return data.url as string;
+  }
+
+  // Si el usuario quiere conservar las capturas, las sube y las embebe en el markdown.
+  async function withKeptImages(contenido: string | null): Promise<string | null> {
+    if (!keepImages || !hasConversationImages) return contenido;
+    const imgs = conversationImages();
+    const urls = await Promise.all(imgs.map((d, i) => uploadDataUrl(d, i)));
+    const embeds = urls.map((u, i) => `![captura ${i + 1}](${u})`).join('\n');
+    const base = (contenido ?? '').trim();
+    return base ? `${base}\n\n${embeds}` : embeds;
+  }
+
+  async function createFrom(body: { contenido?: string | null } & Record<string, unknown>) {
     setLoading(true);
     setError(null);
     try {
+      const contenido = await withKeptImages(body.contenido ?? null);
       const res = await fetch('/api/sistemas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, contenido }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error((data as { error?: string }).error ?? `POST falló (${res.status})`);
@@ -252,6 +286,7 @@ export default function SistemasAiChat({
           return sys ? { sistema_id: sys.id, accion: p.accion, dato: p.dato } : null;
         })
         .filter((p): p is { sistema_id: string; accion: string; dato: string } => p !== null);
+      const contenido = await withKeptImages(draft.contenido);
       const res = await fetch('/api/sistemas/secciones', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -259,7 +294,7 @@ export default function SistemasAiChat({
           sistema_id: target.id,
           titulo: draft.titulo,
           tipo: draft.tipo ?? 'acción',
-          contenido: draft.contenido,
+          contenido,
           pasos,
         }),
       });
@@ -297,6 +332,19 @@ export default function SistemasAiChat({
   }
 
   if (!open) return null;
+
+  // Toggle para conservar las capturas en la documentación (solo si hubo imágenes).
+  const keepImagesToggle = hasConversationImages ? (
+    <label className="flex items-center gap-2 text-xs text-[var(--muted)] pt-1 cursor-pointer select-none">
+      <input
+        type="checkbox"
+        checked={keepImages}
+        onChange={(e) => setKeepImages(e.target.checked)}
+        className="accent-[var(--accent)]"
+      />
+      Conservar la(s) captura(s) en la documentación
+    </label>
+  ) : null;
 
   return (
     <div
@@ -376,6 +424,7 @@ export default function SistemasAiChat({
         {proposal && proposal.action === 'propose_create' && (
           <ProposalBox>
             <CreatePreview draft={proposal.draft} />
+            {keepImagesToggle}
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => createFrom(draftToBody(proposal.draft))}
@@ -474,6 +523,7 @@ export default function SistemasAiChat({
                   Nueva acción en {target.nombre}
                 </div>
                 <AccionPreview draft={proposal.draft} />
+                {keepImagesToggle}
                 <div className="flex gap-2 pt-2">
                   <button
                     onClick={() => createAccion(target, proposal.draft)}
