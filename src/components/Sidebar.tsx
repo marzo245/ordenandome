@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { Task } from '@/lib/types';
 
@@ -96,7 +97,7 @@ function SidebarContent({
       {/* Navegación de primer nivel */}
       <div className="flex flex-col">
         {NAV_ITEMS.map((item) => (
-          <a
+          <Link
             key={item.href}
             href={item.href}
             onClick={onClose}
@@ -105,7 +106,7 @@ function SidebarContent({
             <span className="w-3 flex-shrink-0" />
             <span>{item.icon}</span>
             <span className="truncate">{item.label}</span>
-          </a>
+          </Link>
         ))}
       </div>
 
@@ -135,18 +136,18 @@ function SidebarContent({
                 >
                   {isOpen ? '▾' : '▸'}
                 </button>
-                <a
+                <Link
                   href="/"
                   onClick={onClose}
                   className="flex-1 min-w-0 flex items-center"
                 >
                   <TaskTitle task={parent} />
-                </a>
+                </Link>
               </div>
               {isOpen && (
                 <div className="flex flex-col">
                   {kids.map((child) => (
-                    <a
+                    <Link
                       key={child.id}
                       href="/"
                       onClick={onClose}
@@ -154,7 +155,7 @@ function SidebarContent({
                     >
                       <span className="text-xs text-[var(--muted)]">↳</span>
                       <TaskTitle task={child} />
-                    </a>
+                    </Link>
                   ))}
                 </div>
               )}
@@ -163,7 +164,7 @@ function SidebarContent({
         })}
 
         {standalone.map((task) => (
-          <a
+          <Link
             key={task.id}
             href="/"
             onClick={onClose}
@@ -173,7 +174,7 @@ function SidebarContent({
               ·
             </span>
             <TaskTitle task={task} />
-          </a>
+          </Link>
         ))}
 
         {(extraParents > 0 || extraStandalone > 0) && (
