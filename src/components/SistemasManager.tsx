@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AccionPaso, Sistema, SistemaSeccion } from '@/db';
@@ -45,6 +45,100 @@ function Markdown({ value }: { value: string | null }) {
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
         {value}
       </ReactMarkdown>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Textarea markdown con pegar/arrastrar imágenes (mismo patrón Notas)  */
+/* ------------------------------------------------------------------ */
+
+function MarkdownImageTextarea({
+  value,
+  onChange,
+  rows,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  rows?: number;
+  placeholder?: string;
+  className?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  function insertAtCursor(text: string) {
+    const el = ref.current;
+    if (!el) {
+      onChange(value + text);
+      return;
+    }
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const next = value.slice(0, start) + text + value.slice(end);
+    onChange(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + text.length;
+      el.setSelectionRange(pos, pos);
+    });
+  }
+
+  async function uploadImage(file: File) {
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/notes/upload-image', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { error?: string }).error ?? 'upload failed');
+      insertAtCursor(`![${data.alt || ''}](${data.url})\n`);
+    } catch (e) {
+      alert(`Error subiendo imagen: ${(e as Error).message}`);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const item = Array.from(e.clipboardData.items).find((it) =>
+      it.type.startsWith('image/'),
+    );
+    if (!item) return;
+    const file = item.getAsFile();
+    if (!file) return;
+    e.preventDefault();
+    void uploadImage(file);
+  }
+
+  function onDrop(e: React.DragEvent<HTMLTextAreaElement>) {
+    const files = Array.from(e.dataTransfer.files).filter((f) =>
+      f.type.startsWith('image/'),
+    );
+    if (!files.length) return;
+    e.preventDefault();
+    files.forEach((f) => void uploadImage(f));
+  }
+
+  return (
+    <div className="relative">
+      <textarea
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onPaste={onPaste}
+        onDrop={onDrop}
+        rows={rows}
+        placeholder={placeholder}
+        className={className}
+      />
+      {uploading && (
+        <span className="absolute top-1.5 right-2 text-[11px] text-[var(--muted)] mono bg-[var(--bg)] px-1 rounded">
+          subiendo…
+        </span>
+      )}
     </div>
   );
 }
@@ -556,10 +650,11 @@ function SistemaEditor({
 
       <div>
         <label className={labelCls}>Documentación (markdown)</label>
-        <textarea
+        <MarkdownImageTextarea
           value={buffer.contenido}
-          onChange={(e) => upd({ contenido: e.target.value })}
+          onChange={(v) => upd({ contenido: v })}
           rows={10}
+          placeholder="Documentación… pega o arrastra imágenes (Ctrl/⌘+V)"
           className={textareaCls}
         />
       </div>
@@ -982,11 +1077,11 @@ function AccionesTab({
 
                   <div>
                     <label className={labelCls}>Detalle (markdown)</label>
-                    <textarea
+                    <MarkdownImageTextarea
                       value={buffer.contenido}
-                      onChange={(e) => upd({ contenido: e.target.value })}
+                      onChange={(v) => upd({ contenido: v })}
                       rows={6}
-                      placeholder="Pasos, requisitos o notas para realizar esta acción"
+                      placeholder="Pasos, requisitos o notas… pega o arrastra imágenes (Ctrl/⌘+V)"
                       className={textareaCls}
                     />
                   </div>
