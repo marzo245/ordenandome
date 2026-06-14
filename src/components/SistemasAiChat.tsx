@@ -4,9 +4,14 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Sistema } from '@/db';
+import type { AccionPaso, Sistema, SistemaSeccion } from '@/db';
 import GuitoWalker from './GuitoWalker';
-import type { AccionDraft, SistemaAiResult, SistemaDraft } from '@/lib/sistemas-ai';
+import type {
+  AccionDraft,
+  AccionDraftPaso,
+  SistemaAiResult,
+  SistemaDraft,
+} from '@/lib/sistemas-ai';
 
 type ChatMessage = {
   role: 'user' | 'assistant';
@@ -63,7 +68,7 @@ function AssistantMarkdown({ value }: { value: string }) {
 }
 
 const PLACEHOLDER =
-  'Pregunta por los sistemas (OPERA, eCO, Salesforce, ForceBeat, Beats, SAP), pide documentar uno nuevo, mejorar la doc de uno existente o añadir acciones que se pueden hacer en un sistema.';
+  'Pregunta por los sistemas (OPERA, eCO, Salesforce, ForceBeat, Beats, SAP), documenta uno nuevo, crea acciones, o pide editar una acción existente (p. ej. «agrega a «Crear cuenta» un paso en SAP»).';
 
 export default function SistemasAiChat({
   open,
@@ -74,6 +79,7 @@ export default function SistemasAiChat({
 }) {
   const router = useRouter();
   const [sistemas, setSistemas] = useState<Sistema[]>([]);
+  const [acciones, setAcciones] = useState<SistemaSeccion[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -140,12 +146,20 @@ export default function SistemasAiChat({
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/sistemas');
-        if (!res.ok) return;
-        const data = (await res.json()) as Sistema[];
-        if (!cancelled && Array.isArray(data)) setSistemas(data);
+        const [sRes, aRes] = await Promise.all([
+          fetch('/api/sistemas'),
+          fetch('/api/sistemas/secciones'),
+        ]);
+        if (sRes.ok) {
+          const data = (await sRes.json()) as Sistema[];
+          if (!cancelled && Array.isArray(data)) setSistemas(data);
+        }
+        if (aRes.ok) {
+          const data = (await aRes.json()) as SistemaSeccion[];
+          if (!cancelled && Array.isArray(data)) setAcciones(data);
+        }
       } catch {
-        /* el contexto es opcional para resolver propose_edit */
+        /* el contexto es opcional para resolver propose_edit/edit_accion */
       }
     })();
     return () => {
@@ -192,7 +206,8 @@ export default function SistemasAiChat({
       if (
         data.action === 'propose_create' ||
         data.action === 'propose_edit' ||
-        data.action === 'propose_create_accion'
+        data.action === 'propose_create_accion' ||
+        data.action === 'propose_edit_accion'
       ) {
         setProposal(data);
       } else {
@@ -275,17 +290,36 @@ export default function SistemasAiChat({
     return sistemas.find((s) => (s.nombre ?? '').trim().toLowerCase() === target) ?? null;
   }
 
+  // Resuelve los pasos (sistema por NOMBRE de la IA) a sistema_id.
+  function mapPasos(draftPasos: AccionDraftPaso[]): AccionPaso[] {
+    return draftPasos
+      .map((p) => {
+        const sys = resolveTarget(p.sistema);
+        return sys
+          ? { sistema_id: sys.id, accion: p.accion, dato: p.dato }
+          : null;
+      })
+      .filter((p): p is AccionPaso => p !== null);
+  }
+
+  // Busca la acción existente por título (+ sistema para desambiguar).
+  function resolveAccion(targetTitulo: string, targetSistema: string): SistemaSeccion | null {
+    const t = targetTitulo.trim().toLowerCase();
+    const sis = resolveTarget(targetSistema);
+    const matches = acciones.filter((a) => (a.titulo ?? '').trim().toLowerCase() === t);
+    if (matches.length === 0) return null;
+    if (sis) {
+      const inSistema = matches.find((a) => a.sistema_id === sis.id);
+      if (inSistema) return inSistema;
+    }
+    return matches[0];
+  }
+
   async function createAccion(target: Sistema, draft: AccionDraft) {
     setLoading(true);
     setError(null);
     try {
-      // Los pasos vienen con el sistema por NOMBRE; los resolvemos a sistema_id.
-      const pasos = (draft.pasos ?? [])
-        .map((p) => {
-          const sys = resolveTarget(p.sistema);
-          return sys ? { sistema_id: sys.id, accion: p.accion, dato: p.dato } : null;
-        })
-        .filter((p): p is { sistema_id: string; accion: string; dato: string } => p !== null);
+      const pasos = mapPasos(draft.pasos ?? []);
       const contenido = await withKeptImages(draft.contenido);
       const res = await fetch('/api/sistemas/secciones', {
         method: 'POST',
@@ -305,6 +339,40 @@ export default function SistemasAiChat({
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al crear la acción');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Aplica la edición propuesta a una acción existente (pasos + detalle).
+  async function applyAccionEdit(
+    target: SistemaSeccion,
+    draftPasos: AccionDraftPaso[],
+    contenido: string | null,
+  ) {
+    setLoading(true);
+    setError(null);
+    try {
+      const patch: Record<string, unknown> = {};
+      // La IA devuelve el flujo COMPLETO actualizado; si vino vacío, conservamos el actual.
+      if (draftPasos.length > 0) patch.pasos = mapPasos(draftPasos);
+      if (contenido && contenido.trim()) patch.contenido = contenido;
+      if (Object.keys(patch).length === 0) {
+        setError('La propuesta no traía cambios aplicables.');
+        return;
+      }
+      const res = await fetch(`/api/sistemas/secciones/${target.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error((data as { error?: string }).error ?? `PATCH falló (${res.status})`);
+      router.refresh();
+      resetConversation();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al editar la acción');
     } finally {
       setLoading(false);
     }
@@ -531,6 +599,76 @@ export default function SistemasAiChat({
                     className="bg-[var(--accent)] text-white rounded px-4 py-1.5 text-sm hover:opacity-90 disabled:opacity-50"
                   >
                     Crear acción
+                  </button>
+                  <button
+                    onClick={() => setProposal(null)}
+                    disabled={loading}
+                    className="border border-[var(--border)] rounded px-4 py-1.5 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50"
+                  >
+                    Pedir cambios
+                  </button>
+                </div>
+              </ProposalBox>
+            );
+          })()
+        )}
+
+        {proposal && proposal.action === 'propose_edit_accion' && (
+          (() => {
+            const target = resolveAccion(proposal.targetTitulo, proposal.targetSistema);
+            if (!target) {
+              return (
+                <ProposalBox>
+                  <p className="text-sm text-[var(--text)]">
+                    No encontré la acción “{proposal.targetTitulo}”
+                    {proposal.targetSistema ? ` en ${proposal.targetSistema}` : ''}.
+                    ¿A qué acción te refieres?
+                  </p>
+                </ProposalBox>
+              );
+            }
+            return (
+              <ProposalBox>
+                <div className="text-xs text-[var(--muted)] mono">
+                  Editar acción: {target.titulo}
+                </div>
+                {proposal.pasos.length > 0 && (
+                  <Field
+                    label="Flujo nuevo"
+                    value={
+                      <ol className="list-decimal list-outside ml-4 space-y-0.5">
+                        {proposal.pasos.map((p, i) => (
+                          <li key={i} className="text-[var(--text)]">
+                            <span className="font-medium">{p.sistema}</span>
+                            {p.accion ? `: ${p.accion}` : ''}
+                            {p.dato ? (
+                              <span className="text-[var(--muted)]"> → {p.dato}</span>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ol>
+                    }
+                  />
+                )}
+                {proposal.contenido && (
+                  <Field
+                    label="Detalle"
+                    value={
+                      <span className="text-[var(--muted)]">
+                        {summarize(proposal.contenido)}
+                      </span>
+                    }
+                  />
+                )}
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() =>
+                      applyAccionEdit(target, proposal.pasos, proposal.contenido)
+                    }
+                    disabled={loading}
+                    className="bg-[var(--accent)] text-white rounded px-4 py-1.5 text-sm hover:opacity-90 disabled:opacity-50"
+                  >
+                    Aplicar cambios
                   </button>
                   <button
                     onClick={() => setProposal(null)}

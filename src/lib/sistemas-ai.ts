@@ -40,6 +40,14 @@ export type SistemaAiResult =
       message: string;
       targetNombre: string;
       draft: AccionDraft;
+    }
+  | {
+      action: 'propose_edit_accion';
+      message: string;
+      targetTitulo: string; // título de la acción existente
+      targetSistema: string; // sistema donde está esa acción (para desambiguar)
+      pasos: AccionDraftPaso[]; // flujo COMPLETO actualizado (con inserciones en su lugar)
+      contenido: string | null; // detalle markdown actualizado (o null si no cambia)
     };
 
 const SYSTEM = (resumen: string, accionesResumen: string) => `Eres un asistente experto en los SISTEMAS del flujo de creación de cuentas de Enel. Hablas en español, directo y claro.
@@ -90,10 +98,16 @@ ${accionesResumen}
    - targetNombre: el nombre EXACTO del SISTEMA DONDE EMPIEZA la acción (tal cual aparece arriba). Si el sistema no existe en la lista, NO inventes: usa "clarify" para preguntar o sugiere crearlo primero.
    - draft: { titulo, tipo, contenido, pasos }. Redacta "contenido" en markdown cuando ayude; si no, déjalo en null.
    - Si la acción ATRAVIESA VARIOS SISTEMAS (empieza en uno, sacas un dato y vas al siguiente), llena "pasos" con el flujo ordenado [{sistema, accion, dato}, ...] usando nombres EXACTOS de sistemas, y pon targetNombre = el sistema del primer paso. Si es de un solo sistema, "pasos": [].
-5. Si falta información para decidir o para un campo crítico (p. ej. a qué sistema pertenece la acción) → action "clarify" con UNA sola pregunta concreta.
+5. Si el usuario pide MODIFICAR una ACCIÓN EXISTENTE (ej. "agrega a «Crear cuenta» un paso en SAP", "inserta un paso de validación en OPERA en esa acción", "mejora el detalle de esa acción") → action "propose_edit_accion":
+   - targetTitulo: el título EXACTO de la acción existente (tal cual aparece en "Acciones registradas").
+   - targetSistema: el nombre EXACTO del sistema donde está esa acción (su sistema, para desambiguar).
+   - pasos: el flujo COMPLETO y ACTUALIZADO (no solo los nuevos): toma los pasos actuales de esa acción y AÑADE/INSERTA los nuevos en la posición lógica que corresponda (tú decides dónde van). Cada paso {sistema, accion, dato} con nombres EXACTOS.
+   - contenido: el detalle markdown ACTUALIZADO de esa acción (parte del detalle actual y refléjalo con los cambios). Si no procede cambiarlo, repite el detalle actual. No borres información válida.
+   - Si no identificas la acción con certeza, usa "clarify".
+6. Si falta información para decidir o para un campo crítico (p. ej. a qué sistema o acción se refiere) → action "clarify" con UNA sola pregunta concreta.
 
 ## FORMATO DE SALIDA — SIEMPRE JSON VÁLIDO, sin texto fuera del JSON
-El objeto JSON SIEMPRE debe tener un campo de primer nivel "action" cuyo valor es EXACTAMENTE uno de: "clarify", "answer", "propose_create", "propose_edit" o "propose_create_accion". Nunca omitas "action".
+El objeto JSON SIEMPRE debe tener un campo de primer nivel "action" cuyo valor es EXACTAMENTE uno de: "clarify", "answer", "propose_create", "propose_edit", "propose_create_accion" o "propose_edit_accion". Nunca omitas "action".
 Ejemplos (uno por cada action):
 
 {"action":"clarify","message":"¿A qué sistema quieres agregar la acción «consultar saldo»?"}
@@ -107,6 +121,8 @@ Ejemplos (uno por cada action):
 {"action":"propose_create_accion","message":"Propongo añadir a OPERA la acción «Crear reserva».","targetNombre":"OPERA","draft":{"titulo":"Crear reserva","tipo":"procedimiento","contenido":"## Crear reserva\n\n1. Abrir OPERA\n2. ...","pasos":[]}}
 
 {"action":"propose_create_accion","message":"Propongo el flujo «Crear cuenta completa» que cruza Salesforce, OPERA y SAP.","targetNombre":"Salesforce","draft":{"titulo":"Crear cuenta completa","tipo":"flujo","contenido":null,"pasos":[{"sistema":"Salesforce","accion":"Registrar el caso","dato":"ID del caso"},{"sistema":"OPERA","accion":"Crear reserva con el ID del caso","dato":"código de reserva"},{"sistema":"SAP","accion":"Facturar con el código de reserva","dato":"nº de contrato"}]}}
+
+{"action":"propose_edit_accion","message":"Inserto un paso de validación en eCO entre Salesforce y OPERA, y actualizo el detalle.","targetTitulo":"Crear cuenta completa","targetSistema":"Salesforce","pasos":[{"sistema":"Salesforce","accion":"Registrar el caso","dato":"ID del caso"},{"sistema":"eCO","accion":"Validar datos del cliente","dato":"OK validación"},{"sistema":"OPERA","accion":"Crear reserva con el ID del caso","dato":"código de reserva"},{"sistema":"SAP","accion":"Facturar con el código de reserva","dato":"nº de contrato"}],"contenido":"## Crear cuenta completa\n\nFlujo entre sistemas...\n\n1. Salesforce: registrar el caso → ID\n2. eCO: validar datos → OK\n3. OPERA: crear reserva → código\n4. SAP: facturar → contrato"}
 
 Si el usuario dice "sí"/"confirma" a un borrador previo, repite el último propose tal cual.`;
 
@@ -133,11 +149,24 @@ function summarizeAcciones(
   return acciones
     .map((a) => {
       const sistema = nameById.get(a.sistema_id) ?? '(sistema desconocido)';
-      const titulo = a.titulo?.trim() ? truncate(a.titulo, 80) : '(sin título)';
+      const titulo = a.titulo?.trim() ? a.titulo.trim() : '(sin título)';
       const tipo = a.tipo?.trim() ? a.tipo.trim() : 'acción';
-      return `- ${sistema} · ${titulo} (${tipo})`;
+      const pasos = Array.isArray(a.pasos) ? a.pasos : [];
+      const pasosTxt = pasos.length
+        ? pasos
+            .map((p, i) => {
+              const sn = nameById.get(p.sistema_id) ?? '(sistema)';
+              const dato = p.dato?.trim() ? ` → ${p.dato.trim()}` : '';
+              return `    ${i + 1}. ${sn}: ${p.accion ?? ''}${dato}`;
+            })
+            .join('\n')
+        : '    (sin pasos)';
+      const detalle = a.contenido?.trim()
+        ? truncate(a.contenido, 600)
+        : '(sin detalle)';
+      return `### ${sistema} › ${titulo} (${tipo})\n  Detalle: ${detalle}\n  Pasos:\n${pasosTxt}`;
     })
-    .join('\n');
+    .join('\n\n');
 }
 
 function truncate(s: string, n: number): string {
@@ -344,12 +373,14 @@ export async function sistemasAssistant(
     'propose_create',
     'propose_edit',
     'propose_create_accion',
+    'propose_edit_accion',
   ];
   let action = parsed.action as string | undefined;
   if (!action || !VALID_ACTIONS.includes(action)) {
     // Un draft con "titulo" (sin "nombre") es una acción, no un sistema.
     const draftObj = parsed.draft as Record<string, unknown> | undefined;
-    if (draftObj && 'titulo' in draftObj && !('nombre' in draftObj))
+    if (parsed.targetTitulo && parsed.pasos) action = 'propose_edit_accion';
+    else if (draftObj && 'titulo' in draftObj && !('nombre' in draftObj))
       action = 'propose_create_accion';
     else if (parsed.draft) action = 'propose_create';
     else if (parsed.patch) action = 'propose_edit';
@@ -431,6 +462,28 @@ export async function sistemasAssistant(
       };
     }
     return { action, message, targetNombre, draft };
+  }
+
+  if (action === 'propose_edit_accion') {
+    const targetTitulo =
+      typeof parsed.targetTitulo === 'string' ? parsed.targetTitulo : '';
+    const targetSistema =
+      typeof parsed.targetSistema === 'string' ? parsed.targetSistema : '';
+    const pasos = normalizeAccionPasos(parsed.pasos);
+    const contenido =
+      typeof parsed.contenido === 'string' && parsed.contenido.trim()
+        ? parsed.contenido
+        : null;
+    if (!targetTitulo.trim() || (pasos.length === 0 && !contenido)) {
+      return {
+        action: 'clarify',
+        message:
+          typeof parsed.message === 'string' && parsed.message.trim()
+            ? parsed.message
+            : '¿Qué acción quieres modificar y qué paso quieres añadir?',
+      };
+    }
+    return { action, message, targetTitulo, targetSistema, pasos, contenido };
   }
 
   return { action: 'clarify', message };
