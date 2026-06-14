@@ -216,9 +216,11 @@ function looksLikeQuestion(
   );
 }
 
-const PASOS_SYSTEM = (nombres: string) => `Eres un asistente que diseña el FLUJO de una acción operativa que puede ATRAVESAR VARIOS SISTEMAS. Hablas en español.
+const PASOS_SYSTEM = (nombres: string) => `Eres un asistente que documenta ACCIONES operativas que pueden ATRAVESAR VARIOS SISTEMAS. Hablas en español.
 
-Te dan el título de una acción y (opcional) su detalle. Devuelves los PASOS ORDENADOS del flujo: en qué sistema ocurre cada paso, qué se hace ahí y qué DATO se obtiene para llevar al siguiente paso.
+Te dan el título de una acción, su detalle actual (markdown, puede estar vacío) y una DESCRIPCIÓN en lenguaje natural de lo que el usuario quiere documentar (los pasos del flujo). Debes:
+1. Diseñar los PASOS ORDENADOS del flujo: en qué sistema ocurre cada paso, qué se hace ahí y qué DATO se obtiene para llevar al siguiente paso.
+2. Completar/mejorar el DETALLE en markdown de la acción (campo "contenido"), integrando lo que ya había y la descripción dada. Usa listas o secciones claras.
 
 ## Sistemas disponibles (usa los nombres EXACTOS de esta lista)
 ${nombres}
@@ -228,25 +230,32 @@ ${nombres}
 - Ordena los pasos en el orden lógico del flujo. El primer paso es donde empieza la acción.
 - "dato" = el dato que se obtiene en ese paso y se usa en el siguiente (o "" si no aplica).
 - Si la acción es de un solo sistema, devuelve un único paso.
-- No inventes datos que no se deduzcan del contexto; si dudas, deja "dato" en "".
+- "contenido": markdown útil y real (no placeholder). Conserva lo que ya estaba en el detalle y extiéndelo; no borres información válida.
+- No inventes datos que no se deduzcan de la descripción o el contexto; si dudas, deja "dato" en "".
 
 ## Salida — SOLO JSON válido, sin texto alrededor
-{"pasos":[{"sistema":"<nombre exacto>","accion":"<qué se hace>","dato":"<dato para el siguiente paso o ''>"}]}`;
+{"contenido":"<detalle en markdown>","pasos":[{"sistema":"<nombre exacto>","accion":"<qué se hace>","dato":"<dato para el siguiente paso o ''>"}]}`;
 
-/** Sugiere los pasos del flujo de una acción (sistemas por NOMBRE). */
+/** Propone los pasos del flujo y completa el detalle markdown de una acción. */
 export async function suggestAccionPasos(
-  input: { titulo: string; contenido?: string | null; sistemaInicial?: string | null },
+  input: {
+    titulo: string;
+    contenido?: string | null;
+    descripcion?: string | null;
+    sistemaInicial?: string | null;
+  },
   sistemas: Sistema[]
-): Promise<AccionDraftPaso[]> {
+): Promise<{ pasos: AccionDraftPaso[]; contenido: string | null }> {
   const nombres =
     sistemas.length > 0
       ? sistemas.map((s) => `- ${s.nombre}`).join('\n')
       : '(sin sistemas: no puedes proponer pasos)';
-  if (sistemas.length === 0) return [];
+  if (sistemas.length === 0) return { pasos: [], contenido: null };
 
   const user = JSON.stringify({
     titulo: input.titulo,
-    detalle: input.contenido ?? '',
+    detalle_actual: input.contenido ?? '',
+    descripcion: input.descripcion ?? '',
     sistema_inicial: input.sistemaInicial ?? null,
   });
 
@@ -269,10 +278,19 @@ export async function suggestAccionPasos(
   }
 
   try {
-    const parsed = JSON.parse(extractJson(result.content)) as { pasos?: unknown };
-    return normalizeAccionPasos(parsed.pasos);
+    const parsed = JSON.parse(extractJson(result.content)) as {
+      pasos?: unknown;
+      contenido?: unknown;
+    };
+    return {
+      pasos: normalizeAccionPasos(parsed.pasos),
+      contenido:
+        typeof parsed.contenido === 'string' && parsed.contenido.trim()
+          ? parsed.contenido
+          : null,
+    };
   } catch {
-    return [];
+    return { pasos: [], contenido: null };
   }
 }
 

@@ -717,6 +717,7 @@ function AccionesTab({
   const [error, setError] = useState<string | null>(null);
   const [sistemaFilter, setSistemaFilter] = useState('Todos');
   const [suggesting, setSuggesting] = useState(false);
+  const [pasoPrompt, setPasoPrompt] = useState('');
 
   const sistemaName = useMemo(() => {
     const map = new Map<string, string>();
@@ -886,11 +887,16 @@ function AccionesTab({
     upd({ pasos: next });
   }
 
-  // Pide a la IA que proponga los pasos del flujo y los añade al buffer.
+  // Pide a la IA que, a partir de la descripción, complete el detalle markdown
+  // y proponga los pasos del flujo; los añade al buffer.
   async function suggestPasos() {
     if (!buffer) return;
     if (!buffer.titulo.trim()) {
       setError('Ponle un título a la acción para que la IA proponga pasos.');
+      return;
+    }
+    if (!pasoPrompt.trim() && !buffer.contenido.trim()) {
+      setError('Explica el flujo en el campo de abajo para que la IA lo complete.');
       return;
     }
     setSuggesting(true);
@@ -904,6 +910,7 @@ function AccionesTab({
         body: JSON.stringify({
           titulo: buffer.titulo,
           contenido: buffer.contenido,
+          descripcion: pasoPrompt,
           sistemaInicial,
         }),
       });
@@ -928,13 +935,20 @@ function AccionesTab({
           dato: p.dato ?? '',
         }))
         .filter((p) => p.sistema_id);
-      if (mapped.length === 0) {
-        setError('La IA no sugirió pasos. Prueba con un título o detalle más claro.');
+
+      const patch: Partial<AccionBuffer> = {};
+      if (mapped.length > 0) patch.pasos = [...buffer.pasos, ...mapped];
+      if (typeof data.contenido === 'string' && data.contenido.trim()) {
+        patch.contenido = data.contenido;
+      }
+      if (Object.keys(patch).length === 0) {
+        setError('La IA no devolvió nada. Prueba describiendo mejor el flujo.');
         return;
       }
-      upd({ pasos: [...buffer.pasos, ...mapped] });
+      upd(patch);
+      setPasoPrompt('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error sugiriendo pasos');
+      setError(e instanceof Error ? e.message : 'Error generando con IA');
     } finally {
       setSuggesting(false);
     }
@@ -1162,30 +1176,41 @@ function AccionesTab({
                       <label className={`${labelCls} mb-0`}>
                         Flujo entre sistemas
                       </label>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={suggestPasos}
-                          disabled={suggesting}
-                          title="Proponer los pasos del flujo con IA"
-                          className="text-sm px-2 py-1 rounded text-[var(--accent)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
-                        >
-                          {suggesting ? '✨ pensando…' : '✨ con IA'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={addPaso}
-                          className="text-sm px-2 py-1 rounded text-[var(--accent)] hover:bg-[var(--surface-hover)]"
-                        >
-                          + Paso
-                        </button>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={addPaso}
+                        className="text-sm px-2 py-1 rounded text-[var(--accent)] hover:bg-[var(--surface-hover)]"
+                      >
+                        + Paso
+                      </button>
                     </div>
-                    <p className="text-xs text-[var(--muted)] mb-3">
+                    <p className="text-xs text-[var(--muted)] mb-2">
                       Si la acción atraviesa varios sistemas: añade un paso por
                       sistema, indicando qué haces y qué dato sacas para el siguiente.
                       Déjalo vacío si es de un solo sistema.
                     </p>
+
+                    {/* Generar el flujo con IA a partir de una descripción */}
+                    <div className="mb-3 border border-[var(--border)] rounded-lg p-2.5 bg-[var(--surface)]">
+                      <textarea
+                        value={pasoPrompt}
+                        onChange={(e) => setPasoPrompt(e.target.value)}
+                        rows={2}
+                        placeholder="Explica el flujo en lenguaje natural (p. ej. «empiezo en Salesforce creando el caso, saco el ID y en OPERA creo la reserva…»). La IA completa el detalle y agrega los pasos."
+                        className={`${inputCls} resize-y`}
+                      />
+                      <div className="flex justify-end mt-2">
+                        <button
+                          type="button"
+                          onClick={suggestPasos}
+                          disabled={suggesting}
+                          title="La IA completa el detalle y agrega los pasos"
+                          className="text-sm px-3 py-1.5 rounded bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+                        >
+                          {suggesting ? '✨ generando…' : '✨ Generar con IA'}
+                        </button>
+                      </div>
+                    </div>
 
                     {buffer.pasos.length === 0 ? (
                       <p className="text-sm text-[var(--muted)] py-1">

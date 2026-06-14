@@ -18,17 +18,19 @@ export async function POST(req: NextRequest) {
       .from(sistemas)
       .orderBy(asc(sistemas.orden), asc(sistemas.nombre));
 
-    const pasos = await suggestAccionPasos(
+    const result = await suggestAccionPasos(
       {
         titulo,
         contenido: typeof body.contenido === 'string' ? body.contenido : null,
+        descripcion:
+          typeof body.descripcion === 'string' ? body.descripcion : null,
         sistemaInicial:
           typeof body.sistemaInicial === 'string' ? body.sistemaInicial : null,
       },
       rows,
     );
 
-    return NextResponse.json({ pasos });
+    return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
