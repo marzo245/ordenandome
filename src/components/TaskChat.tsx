@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import GuitoWalker from './GuitoWalker';
 
 interface Message {
   id: string;
@@ -61,8 +62,11 @@ export default function TaskChat({ taskId }: { taskId: string }) {
     }
   }
 
+  const walking = input.trim().length > 0 || loading;
+
   return (
     <div className="flex flex-col h-full">
+      <GuitoWalker walking={walking} />
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {loadingHistory ? (
           <p className="text-xs mono text-[var(--muted)]">cargando conversación…</p>

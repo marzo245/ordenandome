@@ -27,9 +27,25 @@ function providerConfig(provider: AiProvider): ProviderConfig {
   };
 }
 
+/** Parte de contenido multimodal (texto o imagen) — formato OpenAI-compatible. */
+type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
+/** El contenido de respuesta del modelo siempre es texto; lo normalizamos a string. */
+function contentToText(content: string | ContentPart[] | null | undefined): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((p) => (p.type === 'text' ? p.text : ''))
+      .join('');
+  }
+  return '';
+}
+
 interface AgentMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
+  content: string | ContentPart[] | null;
   tool_calls?: Array<{
     id: string;
     type: 'function';
@@ -41,7 +57,8 @@ interface AgentMessage {
 
 export interface RunAgentOptions {
   system: string;
-  messages: { role: 'user' | 'assistant'; content: string }[];
+  /** Cada mensaje puede llevar imágenes (URLs públicas o data URLs base64). */
+  messages: { role: 'user' | 'assistant'; content: string; images?: string[] }[];
   temperature?: number;
   responseFormat?: 'text' | 'json_object';
   tools?: boolean;
@@ -75,7 +92,17 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
 
   const conversation: AgentMessage[] = [
     { role: 'system', content: system },
-    ...messages.map((m) => ({ role: m.role, content: m.content })),
+    ...messages.map((m): AgentMessage => {
+      if (m.images && m.images.length > 0) {
+        const parts: ContentPart[] = [];
+        if (m.content) parts.push({ type: 'text', text: m.content });
+        for (const url of m.images) {
+          parts.push({ type: 'image_url', image_url: { url } });
+        }
+        return { role: m.role, content: parts };
+      }
+      return { role: m.role, content: m.content };
+    }),
   ];
 
   let toolCalls = 0;
@@ -107,7 +134,58 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
       body: JSON.stringify(body),
     });
 
-    if (!res.ok) throw new Error(`${provider} ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      const errText = await res.text();
+      const canRetryWithoutTools =
+        provider === 'groq' &&
+        tools &&
+        !isFinal &&
+        res.status === 400 &&
+        errText.includes('tool_use_failed');
+
+      if (!canRetryWithoutTools) throw new Error(`${provider} ${res.status}: ${errText}`);
+
+      const fallbackMessages: AgentMessage[] = [
+        ...conversation,
+        {
+          role: 'system',
+          content:
+            'La llamada a herramientas falló en el proveedor. Responde sin usar herramientas externas, usando solo el contexto disponible. Devuelve exclusivamente el formato final solicitado.',
+        },
+      ];
+      const fallbackBody: Record<string, unknown> = {
+        model: cfg.model,
+        temperature,
+        messages: fallbackMessages,
+      };
+      if (responseFormat === 'json_object') {
+        fallbackBody.response_format = { type: 'json_object' };
+      }
+
+      const fallbackRes = await fetch(cfg.endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: cfg.authHeader,
+        },
+        body: JSON.stringify(fallbackBody),
+      });
+
+      if (!fallbackRes.ok) {
+        throw new Error(
+          `${provider} ${res.status}: ${errText}\nFallback sin herramientas: ${fallbackRes.status}: ${await fallbackRes.text()}`
+        );
+      }
+      const fallbackData = await fallbackRes.json();
+      const fallbackMsg = fallbackData.choices[0].message as AgentMessage;
+      return {
+        content: contentToText(fallbackMsg.content),
+        toolCalls,
+        iterations,
+        provider,
+        model: cfg.model,
+      };
+    }
     const data = await res.json();
     const msg = data.choices[0].message as AgentMessage;
 
@@ -143,7 +221,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     }
 
     return {
-      content: msg.content ?? '',
+      content: contentToText(msg.content),
       toolCalls,
       iterations,
       provider,

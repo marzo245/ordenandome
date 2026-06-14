@@ -3,12 +3,33 @@
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import type { DailySummary as Summary } from '@/lib/types';
+import LottiePlayer from './LottiePlayer';
 
-export default function DailySummary({ initial }: { initial: Summary | null }) {
+export default function DailySummary({ initial = null }: { initial?: Summary | null }) {
   const [summary, setSummary] = useState<Summary | null>(initial);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+
+  // Si no se pasó `initial`, cargar el resumen de hoy al montar.
+  useEffect(() => {
+    if (initial != null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/summary');
+        if (!res.ok) return;
+        const data = (await res.json()) as Summary | null;
+        if (!cancelled) setSummary(data);
+      } catch {
+        // error silencioso
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function regenerate() {
     setLoading(true);
@@ -105,11 +126,11 @@ export default function DailySummary({ initial }: { initial: Summary | null }) {
         onClick={() => setOpen((o) => !o)}
         title="Resumen del día"
         aria-label="Resumen del día"
-        className={`w-14 h-14 rounded-full bg-white border border-[var(--border)] shadow-lg flex items-center justify-center text-2xl hover:shadow-xl transition-shadow ${
+        className={`w-14 h-14 rounded-full bg-white border border-[var(--border)] shadow-lg flex items-center justify-center overflow-hidden hover:shadow-xl transition-shadow ${
           open ? '' : 'animate-[levitate_3s_ease-in-out_infinite]'
         }`}
       >
-        ☀️
+        <LottiePlayer src="/summary-button.json" paused={open} className="w-full h-full" />
       </button>
     </div>
   );

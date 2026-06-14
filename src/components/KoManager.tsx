@@ -1,10 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { KoEntry, KoSubproceso } from '@/db';
-import KoAiChat from './KoAiChat';
 
 /* ------------------------------------------------------------------ */
 /* Markdown rendering (shared)                                         */
@@ -184,10 +183,15 @@ function CatalogoTab({ initial }: { initial: KoEntry[] }) {
   const [buffer, setBuffer] = useState<EntryBuffer | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [aiOpen, setAiOpen] = useState(false);
 
   const [sistemaFilter, setSistemaFilter] = useState('Todos');
   const [query, setQuery] = useState('');
+
+  // El chat global (GUITO) hace router.refresh() tras aplicar cambios; al
+  // recargar las props del server, sincronizamos la lista local.
+  useEffect(() => {
+    setEntries(initial);
+  }, [initial]);
 
   const selected = useMemo(
     () => entries.find((e) => e.id === selectedId) ?? null,
@@ -342,13 +346,6 @@ function CatalogoTab({ initial }: { initial: KoEntry[] }) {
           />
           <button
             type="button"
-            onClick={() => setAiOpen(true)}
-            className="shrink-0 text-sm px-3 py-1 rounded text-[var(--accent)] hover:bg-[var(--surface-hover)]"
-          >
-            ✨ IA
-          </button>
-          <button
-            type="button"
             onClick={createNew}
             disabled={busy}
             className="shrink-0 text-sm px-3 py-1 rounded text-[var(--accent)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
@@ -357,23 +354,6 @@ function CatalogoTab({ initial }: { initial: KoEntry[] }) {
           </button>
         </div>
       </div>
-
-      <KoAiChat
-        open={aiOpen}
-        onClose={() => setAiOpen(false)}
-        entries={entries}
-        onApplied={(entry) =>
-          setEntries((prev) => {
-            const i = prev.findIndex((e) => e.id === entry.id);
-            if (i >= 0) {
-              const c = [...prev];
-              c[i] = entry;
-              return c;
-            }
-            return [entry, ...prev];
-          })
-        }
-      />
 
       {/* Table */}
       <div>
@@ -791,6 +771,10 @@ function SubprocesosTab({ initial }: { initial: KoSubproceso[] }) {
   const [buffer, setBuffer] = useState<SpBuffer | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSubprocesos(initial);
+  }, [initial]);
 
   const selected = useMemo(
     () => subprocesos.find((s) => s.id === selectedId) ?? null,

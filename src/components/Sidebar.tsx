@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { usePathname } from 'next/navigation';
 import type { Task } from '@/lib/types';
 
 interface SidebarProps {
@@ -9,10 +10,13 @@ interface SidebarProps {
   tasks: Task[];
 }
 
-const TODAY_SUBITEMS = [
-  { href: '#notas', label: 'Notas' },
-  { href: '#noticias', label: 'Noticias' },
-  { href: '#github', label: 'GitHub' },
+const NAV_ITEMS = [
+  { href: '/', icon: '📅', label: 'Hoy' },
+  { href: '/notes', icon: '📝', label: 'Notas' },
+  { href: '/noticias', icon: '📰', label: 'Noticias' },
+  { href: '/github', icon: '🐙', label: 'GitHub' },
+  { href: '/ko', icon: '🧠', label: 'KO' },
+  { href: '/sistemas', icon: '🖥️', label: 'Sistemas' },
 ];
 
 const MAX_PARENTS = 15;
@@ -37,8 +41,8 @@ function SidebarContent({
   tasks: Task[];
   onClose?: () => void;
 }) {
+  const pathname = usePathname();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [todayExpanded, setTodayExpanded] = useState(true);
 
   const parents = tasks
     .filter((t) => !t.parent_id && tasks.some((s) => s.parent_id === t.id))
@@ -65,6 +69,11 @@ function SidebarContent({
     });
   }
 
+  function isActive(href: string) {
+    if (href === '/') return pathname === '/';
+    return pathname === href || pathname.startsWith(href + '/');
+  }
+
   const itemBase =
     'px-2 py-1 rounded text-sm text-[var(--muted)] hover:bg-[var(--surface)] hover:text-[var(--text)] cursor-pointer flex items-center gap-1.5';
   const itemActive = 'bg-[var(--surface)] text-[var(--text)]';
@@ -84,65 +93,21 @@ function SidebarContent({
         className="w-full bg-[var(--surface)] border-0 rounded px-2 py-1 text-xs placeholder:text-[var(--muted)] mb-3"
       />
 
-      {/* Hoy (active) */}
-      <div className={`${itemBase} ${itemActive}`}>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            setTodayExpanded((v) => !v);
-          }}
-          className="text-xs text-[var(--muted)] w-3 flex-shrink-0 hover:text-[var(--text)]"
-          aria-label={todayExpanded ? 'Colapsar' : 'Expandir'}
-        >
-          {todayExpanded ? '▾' : '▸'}
-        </button>
-        <a
-          href="#hoy"
-          onClick={onClose}
-          className="flex items-center gap-1.5 flex-1 min-w-0"
-        >
-          <span>📅</span>
-          <span className="truncate">Hoy</span>
-        </a>
+      {/* Navegación de primer nivel */}
+      <div className="flex flex-col">
+        {NAV_ITEMS.map((item) => (
+          <a
+            key={item.href}
+            href={item.href}
+            onClick={onClose}
+            className={`${itemBase} ${isActive(item.href) ? itemActive : ''}`}
+          >
+            <span className="w-3 flex-shrink-0" />
+            <span>{item.icon}</span>
+            <span className="truncate">{item.label}</span>
+          </a>
+        ))}
       </div>
-
-      {todayExpanded && (
-        <div className="flex flex-col">
-          {TODAY_SUBITEMS.map((sub) => (
-            <a
-              key={sub.href}
-              href={sub.href}
-              onClick={onClose}
-              className={`${itemBase} pl-6`}
-            >
-              <span className="text-xs text-[var(--muted)]">▸</span>
-              <span className="truncate">{sub.label}</span>
-            </a>
-          ))}
-        </div>
-      )}
-
-      {/* Notas link */}
-      <a href="/notes" className={itemBase}>
-        <span className="w-3 flex-shrink-0" />
-        <span>📝</span>
-        <span className="truncate">Notas</span>
-      </a>
-
-      {/* KO link */}
-      <a href="/ko" className={itemBase}>
-        <span className="w-3 flex-shrink-0" />
-        <span>🧠</span>
-        <span className="truncate">KO</span>
-      </a>
-
-      {/* Sistemas link */}
-      <a href="/sistemas" className={itemBase}>
-        <span className="w-3 flex-shrink-0" />
-        <span>🖥️</span>
-        <span className="truncate">Sistemas</span>
-      </a>
 
       {/* Divider */}
       <div className="border-t border-[var(--border)] my-3" />
@@ -171,7 +136,7 @@ function SidebarContent({
                   {isOpen ? '▾' : '▸'}
                 </button>
                 <a
-                  href="#hoy"
+                  href="/"
                   onClick={onClose}
                   className="flex-1 min-w-0 flex items-center"
                 >
@@ -183,7 +148,7 @@ function SidebarContent({
                   {kids.map((child) => (
                     <a
                       key={child.id}
-                      href="#hoy"
+                      href="/"
                       onClick={onClose}
                       className={`${itemBase} pl-6`}
                     >
@@ -200,7 +165,7 @@ function SidebarContent({
         {standalone.map((task) => (
           <a
             key={task.id}
-            href="#hoy"
+            href="/"
             onClick={onClose}
             className={itemBase}
           >

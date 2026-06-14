@@ -1,4 +1,4 @@
-import { db, tasks, sistemas } from '@/db';
+import { db, tasks, sistemas, sistema_secciones } from '@/db';
 import { asc, sql } from 'drizzle-orm';
 import { auth } from '@/auth';
 import DashboardShell from '@/components/DashboardShell';
@@ -8,13 +8,17 @@ import SistemasManager from '@/components/SistemasManager';
 export const dynamic = 'force-dynamic';
 
 export default async function SistemasPage() {
-  const [session, tasksRows, rows] = await Promise.all([
+  const [session, tasksRows, rows, sectionRows] = await Promise.all([
     auth(),
     db.select().from(tasks).orderBy(sql`${tasks.due_date} ASC NULLS LAST`),
     db
       .select()
       .from(sistemas)
       .orderBy(asc(sistemas.orden), asc(sistemas.nombre)),
+    db
+      .select()
+      .from(sistema_secciones)
+      .orderBy(asc(sistema_secciones.orden), asc(sistema_secciones.titulo)),
   ]);
 
   return (
@@ -34,7 +38,7 @@ export default async function SistemasPage() {
         </p>
       </div>
 
-      <SistemasManager initial={rows} />
+      <SistemasManager initial={rows} initialSections={sectionRows} />
     </DashboardShell>
   );
 }

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Task } from '@/lib/types';
 import type { ChatMessage, PlannerResult, TaskDraft } from '@/lib/groq-planner';
+import GuitoWalker from './GuitoWalker';
 
 interface Props {
   open: boolean;
@@ -180,6 +181,9 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
 
   if (!open) return null;
 
+  // El personaje camina mientras escribes o mientras la IA piensa.
+  const walking = input.trim().length > 0 || loading;
+
   return (
     <div
       className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
@@ -211,6 +215,9 @@ export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
             </button>
           </div>
         </header>
+
+        {/* GUITO camina por la franja mientras escribes o la IA piensa */}
+        <GuitoWalker walking={walking} />
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.length === 0 && (

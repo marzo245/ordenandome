@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Sistema } from '@/db';
+import type { AccionPaso, Sistema, SistemaSeccion } from '@/db';
 
 /* ------------------------------------------------------------------ */
 /* Markdown rendering (shared)                                         */
@@ -76,7 +76,83 @@ function Chip({ children }: { children: React.ReactNode }) {
 }
 
 /* ================================================================== */
-/* Buffer                                                             */
+/* Root — tabs (Sistemas / Acciones), igual que KO (Catálogo / Subprocesos) */
+/* ================================================================== */
+
+export default function SistemasManager({
+  initial,
+  initialSections,
+}: {
+  initial: Sistema[];
+  initialSections: SistemaSeccion[];
+}) {
+  const [tab, setTab] = useState<'sistemas' | 'acciones'>('sistemas');
+
+  // Estado compartido entre pestañas: la de Acciones necesita los sistemas
+  // para asociar cada acción a uno.
+  const [items, setItems] = useState<Sistema[]>(initial);
+  const [sections, setSections] = useState<SistemaSeccion[]>(initialSections);
+
+  // Resincroniza cuando el server re-renderiza tras router.refresh()
+  // (p. ej. tras crear/editar desde el asistente de IA).
+  useEffect(() => {
+    setItems(initial);
+  }, [initial]);
+  useEffect(() => {
+    setSections(initialSections);
+  }, [initialSections]);
+
+  return (
+    <div className="flex flex-col gap-5">
+      {/* Tabs (Notion-style underline) */}
+      <div className="flex items-center gap-5 border-b border-[var(--border)]">
+        <TabButton active={tab === 'sistemas'} onClick={() => setTab('sistemas')}>
+          Sistemas
+        </TabButton>
+        <TabButton active={tab === 'acciones'} onClick={() => setTab('acciones')}>
+          Acciones
+        </TabButton>
+      </div>
+
+      {tab === 'sistemas' ? (
+        <SistemasTab items={items} setItems={setItems} />
+      ) : (
+        <AccionesTab
+          items={items}
+          sections={sections}
+          setSections={setSections}
+        />
+      )}
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`-mb-px pb-2 text-sm transition-colors border-b-2 ${
+        active
+          ? 'border-[var(--text)] text-[var(--text)] font-medium'
+          : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/* ================================================================== */
+/* Tab 1 — Sistemas                                                   */
 /* ================================================================== */
 
 type SistemaBuffer = {
@@ -99,12 +175,13 @@ function sistemaToBuffer(s: Sistema): SistemaBuffer {
   };
 }
 
-/* ================================================================== */
-/* Root                                                               */
-/* ================================================================== */
-
-export default function SistemasManager({ initial }: { initial: Sistema[] }) {
-  const [items, setItems] = useState<Sistema[]>(initial);
+function SistemasTab({
+  items,
+  setItems,
+}: {
+  items: Sistema[];
+  setItems: React.Dispatch<React.SetStateAction<Sistema[]>>;
+}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [buffer, setBuffer] = useState<SistemaBuffer | null>(null);
@@ -256,9 +333,7 @@ export default function SistemasManager({ initial }: { initial: Sistema[] }) {
                     </div>
                   )}
                 </div>
-                {s.orden != null && (
-                  <Chip>#{s.orden}</Chip>
-                )}
+                {s.orden != null && <Chip>#{s.orden}</Chip>}
               </button>
             ))}
           </div>
@@ -302,10 +377,6 @@ export default function SistemasManager({ initial }: { initial: Sistema[] }) {
   );
 }
 
-/* ================================================================== */
-/* View                                                              */
-/* ================================================================== */
-
 function SistemaView({
   selected,
   onEdit,
@@ -324,9 +395,7 @@ function SistemaView({
               #{selected.orden}
             </div>
           )}
-          <h2 className="text-2xl font-bold tracking-tight">
-            {selected.nombre}
-          </h2>
+          <h2 className="text-2xl font-bold tracking-tight">{selected.nombre}</h2>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
@@ -385,10 +454,6 @@ function SistemaView({
     </div>
   );
 }
-
-/* ================================================================== */
-/* Editor                                                            */
-/* ================================================================== */
 
 function SistemaEditor({
   buffer,
@@ -497,6 +562,601 @@ function SistemaEditor({
           rows={10}
           className={textareaCls}
         />
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
+/* Tab 2 — Acciones (por fuera; cada una asociada a un sistema)        */
+/* ================================================================== */
+
+type AccionBuffer = {
+  sistema_id: string;
+  titulo: string;
+  tipo: string;
+  contenido: string;
+  orden: string;
+  pasos: AccionPaso[];
+};
+
+function accionToBuffer(s: SistemaSeccion): AccionBuffer {
+  return {
+    sistema_id: s.sistema_id ?? '',
+    titulo: s.titulo ?? '',
+    tipo: s.tipo ?? 'acción',
+    contenido: s.contenido ?? '',
+    orden: s.orden != null ? String(s.orden) : '0',
+    pasos: Array.isArray(s.pasos) ? s.pasos : [],
+  };
+}
+
+function AccionesTab({
+  items,
+  sections,
+  setSections,
+}: {
+  items: Sistema[];
+  sections: SistemaSeccion[];
+  setSections: React.Dispatch<React.SetStateAction<SistemaSeccion[]>>;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [buffer, setBuffer] = useState<AccionBuffer | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sistemaFilter, setSistemaFilter] = useState('Todos');
+
+  const sistemaName = useMemo(() => {
+    const map = new Map<string, string>();
+    items.forEach((s) => map.set(s.id, s.nombre));
+    return (id: string) => map.get(id) ?? 'Sistema desconocido';
+  }, [items]);
+
+  const selected = useMemo(
+    () => sections.find((s) => s.id === selectedId) ?? null,
+    [sections, selectedId],
+  );
+
+  // Acciones ordenadas y agrupadas por sistema (respetando el orden de items).
+  const grouped = useMemo(() => {
+    const filtered =
+      sistemaFilter === 'Todos'
+        ? sections
+        : sections.filter((s) => s.sistema_id === sistemaFilter);
+    return items
+      .map((sistema) => ({
+        sistema,
+        acciones: filtered
+          .filter((a) => a.sistema_id === sistema.id)
+          .sort((a, b) => a.orden - b.orden || a.titulo.localeCompare(b.titulo)),
+      }))
+      .filter((g) => g.acciones.length > 0);
+  }, [items, sections, sistemaFilter]);
+
+  function select(id: string) {
+    setSelectedId(id);
+    setEditing(false);
+    setBuffer(null);
+    setError(null);
+  }
+
+  function startEdit() {
+    if (!selected) return;
+    setBuffer(accionToBuffer(selected));
+    setEditing(true);
+    setError(null);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    setBuffer(null);
+    setError(null);
+  }
+
+  async function createNew() {
+    if (items.length === 0) {
+      setError('Crea primero un sistema en la pestaña «Sistemas».');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    // Por defecto, asociamos al sistema filtrado (o al primero).
+    const sistemaId =
+      sistemaFilter !== 'Todos' ? sistemaFilter : items[0].id;
+    const count = sections.filter((s) => s.sistema_id === sistemaId).length;
+    try {
+      const res = await fetch('/api/sistemas/secciones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sistema_id: sistemaId,
+          titulo: 'Nueva acción',
+          tipo: 'acción',
+          contenido: '',
+          orden: count + 1,
+        }),
+      });
+      if (!res.ok) throw new Error(`POST falló (${res.status})`);
+      const created: SistemaSeccion = await res.json();
+      setSections((prev) => [...prev, created]);
+      setSelectedId(created.id);
+      setBuffer(accionToBuffer(created));
+      setEditing(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al crear acción');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    if (!selected || !buffer) return;
+    if (!buffer.sistema_id) {
+      setError('Elige a qué sistema pertenece la acción.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const ordenNum = buffer.orden.trim() === '' ? 0 : Number(buffer.orden);
+      const res = await fetch(`/api/sistemas/secciones/${selected.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sistema_id: buffer.sistema_id,
+          titulo: buffer.titulo.trim() || 'Sin título',
+          tipo: buffer.tipo.trim() || 'acción',
+          contenido: buffer.contenido || null,
+          orden: Number.isNaN(ordenNum) ? 0 : ordenNum,
+          // Solo pasos con sistema y algún contenido (se descartan filas vacías).
+          pasos: buffer.pasos.filter(
+            (p) => p.sistema_id && (p.accion.trim() || p.dato.trim()),
+          ),
+        }),
+      });
+      if (!res.ok) throw new Error(`PATCH falló (${res.status})`);
+      const updated: SistemaSeccion = await res.json();
+      setSections((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+      setEditing(false);
+      setBuffer(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al guardar acción');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!selected) return;
+    if (!confirm(`¿Eliminar la acción "${selected.titulo}"?`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/sistemas/secciones/${selected.id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error(`DELETE falló (${res.status})`);
+      const removedId = selected.id;
+      setSections((prev) => prev.filter((s) => s.id !== removedId));
+      setSelectedId(null);
+      setEditing(false);
+      setBuffer(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al eliminar acción');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const upd = (patch: Partial<AccionBuffer>) =>
+    buffer && setBuffer({ ...buffer, ...patch });
+
+  // --- helpers de pasos (flujo multi-sistema) ---
+  function addPaso() {
+    if (!buffer) return;
+    const sistemaId = buffer.sistema_id || items[0]?.id || '';
+    upd({ pasos: [...buffer.pasos, { sistema_id: sistemaId, accion: '', dato: '' }] });
+  }
+  function updPaso(i: number, patch: Partial<AccionPaso>) {
+    if (!buffer) return;
+    upd({ pasos: buffer.pasos.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
+  }
+  function removePaso(i: number) {
+    if (!buffer) return;
+    upd({ pasos: buffer.pasos.filter((_, j) => j !== i) });
+  }
+  function movePaso(i: number, dir: -1 | 1) {
+    if (!buffer) return;
+    const j = i + dir;
+    if (j < 0 || j >= buffer.pasos.length) return;
+    const next = [...buffer.pasos];
+    [next[i], next[j]] = [next[j], next[i]];
+    upd({ pasos: next });
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Toolbar: filtro por sistema + nueva acción */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setSistemaFilter('Todos')}
+            className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+              sistemaFilter === 'Todos'
+                ? 'border-[var(--text)] text-[var(--text)] font-medium'
+                : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]'
+            }`}
+          >
+            Todos
+          </button>
+          {items.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setSistemaFilter(s.id)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                sistemaFilter === s.id
+                  ? 'border-[var(--text)] text-[var(--text)] font-medium'
+                  : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]'
+              }`}
+            >
+              {s.nombre}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={createNew}
+          disabled={busy}
+          className="shrink-0 text-sm px-3 py-1 rounded text-[var(--accent)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
+        >
+          + Nueva acción
+        </button>
+      </div>
+
+      {error && !selected && (
+        <div className="text-sm text-[var(--danger)]">{error}</div>
+      )}
+
+      {/* Master-detail */}
+      <div className="flex flex-col md:flex-row gap-4">
+        {/* List (agrupada por sistema) */}
+        <div
+          className={`${
+            selectedId ? 'hidden md:block' : 'block'
+          } w-full md:w-72 md:shrink-0 md:border-r md:border-[var(--border)] md:pr-4`}
+        >
+          {grouped.length === 0 ? (
+            <p className="text-sm text-[var(--muted)] px-2 py-4">
+              {items.length === 0
+                ? 'Crea primero un sistema, luego añade acciones aquí.'
+                : 'Sin acciones todavía. Crea la primera con «+ Nueva acción».'}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {grouped.map(({ sistema, acciones }) => (
+                <div key={sistema.id}>
+                  <div className="text-[11px] uppercase tracking-wider text-[var(--muted)] px-2 mb-1">
+                    {sistema.nombre}
+                  </div>
+                  <div className="flex flex-col">
+                    {acciones.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => select(a.id)}
+                        className={`text-left px-2 py-1.5 rounded text-sm hover:bg-[var(--surface-hover)] flex items-center gap-2 ${
+                          a.id === selectedId
+                            ? 'bg-[var(--surface-hover)] font-medium'
+                            : ''
+                        }`}
+                      >
+                        <span className="truncate flex-1">{a.titulo}</span>
+                        {a.pasos && a.pasos.length > 0 && (
+                          <span
+                            className="text-[10px] text-[var(--muted)] shrink-0"
+                            title={`Flujo de ${a.pasos.length} pasos entre sistemas`}
+                          >
+                            ⛓ {a.pasos.length}
+                          </span>
+                        )}
+                        {a.tipo && (
+                          <span className="text-[10px] text-[var(--muted)] shrink-0">
+                            {a.tipo}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Detail / editor */}
+        <div className={`${selectedId ? 'block' : 'hidden md:block'} flex-1 min-w-0`}>
+          {!selected ? (
+            <div className="h-full flex items-center justify-center py-16">
+              <p className="text-sm text-[var(--muted)]">
+                Selecciona o crea una acción
+              </p>
+            </div>
+          ) : (
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedId(null);
+                  setEditing(false);
+                  setBuffer(null);
+                }}
+                className="md:hidden text-sm text-[var(--muted)] hover:text-[var(--text)] mb-3"
+              >
+                ← volver
+              </button>
+
+              {error && (
+                <div className="mb-3 text-sm text-[var(--danger)]">{error}</div>
+              )}
+
+              {editing && buffer ? (
+                <div className="flex flex-col gap-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={save}
+                      disabled={busy}
+                      className="text-sm px-3 py-1.5 rounded bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                      {busy ? 'Guardando…' : 'Guardar acción'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={cancelEdit}
+                      disabled={busy}
+                      className="text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)] disabled:opacity-50"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={remove}
+                      disabled={busy}
+                      className="text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--danger)] disabled:opacity-50 ml-auto"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelCls}>Sistema</label>
+                      <select
+                        value={buffer.sistema_id}
+                        onChange={(e) => upd({ sistema_id: e.target.value })}
+                        className={inputCls}
+                      >
+                        {items.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.nombre}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className={labelCls}>Tipo</label>
+                        <input
+                          type="text"
+                          value={buffer.tipo}
+                          onChange={(e) => upd({ tipo: e.target.value })}
+                          placeholder="acción"
+                          className={inputCls}
+                        />
+                      </div>
+                      <div>
+                        <label className={labelCls}>Orden</label>
+                        <input
+                          type="number"
+                          value={buffer.orden}
+                          onChange={(e) => upd({ orden: e.target.value })}
+                          className={inputCls}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className={labelCls}>Acción</label>
+                    <input
+                      type="text"
+                      value={buffer.titulo}
+                      onChange={(e) => upd({ titulo: e.target.value })}
+                      placeholder="Qué se puede hacer"
+                      className={`${inputCls} text-lg font-semibold`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelCls}>Detalle (markdown)</label>
+                    <textarea
+                      value={buffer.contenido}
+                      onChange={(e) => upd({ contenido: e.target.value })}
+                      rows={6}
+                      placeholder="Pasos, requisitos o notas para realizar esta acción"
+                      className={textareaCls}
+                    />
+                  </div>
+
+                  {/* Pasos del flujo multi-sistema */}
+                  <div className="border-t border-[var(--border)] pt-4">
+                    <div className="flex items-center justify-between gap-3 mb-1">
+                      <label className={`${labelCls} mb-0`}>
+                        Flujo entre sistemas
+                      </label>
+                      <button
+                        type="button"
+                        onClick={addPaso}
+                        className="text-sm px-2 py-1 rounded text-[var(--accent)] hover:bg-[var(--surface-hover)]"
+                      >
+                        + Paso
+                      </button>
+                    </div>
+                    <p className="text-xs text-[var(--muted)] mb-3">
+                      Si la acción atraviesa varios sistemas: añade un paso por
+                      sistema, indicando qué haces y qué dato sacas para el siguiente.
+                      Déjalo vacío si es de un solo sistema.
+                    </p>
+
+                    {buffer.pasos.length === 0 ? (
+                      <p className="text-sm text-[var(--muted)] py-1">
+                        Sin pasos. Acción de un solo sistema.
+                      </p>
+                    ) : (
+                      <div className="flex flex-col gap-3">
+                        {buffer.pasos.map((paso, i) => (
+                          <div
+                            key={i}
+                            className="border border-[var(--border)] rounded-lg p-3 bg-[var(--surface)]"
+                          >
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="mono text-[11px] text-[var(--muted)] font-medium">
+                                Paso {i + 1}
+                              </span>
+                              <select
+                                value={paso.sistema_id}
+                                onChange={(e) =>
+                                  updPaso(i, { sistema_id: e.target.value })
+                                }
+                                className={`${inputCls} flex-1`}
+                              >
+                                {items.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.nombre}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => movePaso(i, -1)}
+                                disabled={i === 0}
+                                className="text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-30 px-1"
+                                title="Subir"
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => movePaso(i, 1)}
+                                disabled={i === buffer.pasos.length - 1}
+                                className="text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-30 px-1"
+                                title="Bajar"
+                              >
+                                ↓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => removePaso(i)}
+                                className="text-[var(--muted)] hover:text-[var(--danger)] px-1"
+                                title="Eliminar paso"
+                              >
+                                ×
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <input
+                                type="text"
+                                value={paso.accion}
+                                onChange={(e) =>
+                                  updPaso(i, { accion: e.target.value })
+                                }
+                                placeholder="Qué haces aquí"
+                                className={inputCls}
+                              />
+                              <input
+                                type="text"
+                                value={paso.dato}
+                                onChange={(e) =>
+                                  updPaso(i, { dato: e.target.value })
+                                }
+                                placeholder="Dato que obtienes →"
+                                className={inputCls}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Chip>{sistemaName(selected.sistema_id)}</Chip>
+                        {selected.tipo && (
+                          <span className="text-[11px] text-[var(--muted)]">
+                            {selected.tipo}
+                          </span>
+                        )}
+                      </div>
+                      <h2 className="text-2xl font-bold tracking-tight">
+                        {selected.titulo}
+                      </h2>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={startEdit}
+                      className="shrink-0 text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--accent)]"
+                    >
+                      Editar
+                    </button>
+                  </div>
+
+                  {selected.pasos && selected.pasos.length > 0 && (
+                    <div>
+                      <SubLabel>Flujo entre sistemas</SubLabel>
+                      <ol className="flex flex-col gap-2">
+                        {selected.pasos.map((paso, i) => (
+                          <li
+                            key={i}
+                            className="border border-[var(--border)] rounded-lg p-3 bg-[var(--surface)]"
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="mono text-[11px] text-[var(--muted)]">
+                                {i + 1}
+                              </span>
+                              <Chip>{sistemaName(paso.sistema_id)}</Chip>
+                            </div>
+                            {paso.accion && (
+                              <p className="text-sm text-[var(--text)]">
+                                {paso.accion}
+                              </p>
+                            )}
+                            {paso.dato && (
+                              <p className="text-xs text-[var(--muted)] mt-0.5">
+                                → dato: {paso.dato}
+                              </p>
+                            )}
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+
+                  <div>
+                    <SubLabel>Detalle</SubLabel>
+                    <Markdown value={selected.contenido} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

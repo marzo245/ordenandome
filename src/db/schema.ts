@@ -140,6 +140,41 @@ export const sistemas = pgTable('sistemas', {
 export type Sistema = typeof sistemas.$inferSelect;
 export type NewSistema = typeof sistemas.$inferInsert;
 
+// Un paso de una acción que atraviesa varios sistemas: empiezas en un sistema,
+// obtienes un dato y lo llevas al siguiente.
+export type AccionPaso = {
+  sistema_id: string; // sistema donde ocurre el paso
+  accion: string; // qué haces en ese sistema
+  dato: string; // dato que obtienes para llevar al siguiente paso
+};
+
+// Acciones de cada sistema: qué se puede hacer. Una acción puede ser de un solo
+// sistema (pasos vacío) o un flujo multi-sistema (pasos ordenados); `sistema_id`
+// es el sistema donde "empieza" la acción.
+export const sistema_secciones = pgTable(
+  'sistema_secciones',
+  {
+    id: uuid().primaryKey().default(sql`gen_random_uuid()`),
+    sistema_id: uuid()
+      .notNull()
+      .references(() => sistemas.id, { onDelete: 'cascade' }),
+    titulo: text().notNull(),
+    tipo: text().notNull().default('general'),
+    contenido: text(),
+    pasos: jsonb().$type<AccionPaso[]>().notNull().default(sql`'[]'::jsonb`),
+    orden: integer().notNull().default(0),
+    created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_sistema_secciones_sistema').on(t.sistema_id),
+    index('idx_sistema_secciones_orden').on(t.orden),
+  ]
+);
+
+export type SistemaSeccion = typeof sistema_secciones.$inferSelect;
+export type NewSistemaSeccion = typeof sistema_secciones.$inferInsert;
+
 // KO: base de conocimiento operativa (Gestión de KO — Enel).
 // Subprocesos: procedimientos de resolución (SP-xxx).
 export const ko_subprocesos = pgTable('ko_subprocesos', {

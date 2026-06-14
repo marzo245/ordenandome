@@ -38,3 +38,16 @@ h1, h2 { letter-spacing: -0.01em; }
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* Personaje que camina de un lado a otro de una franja (planner IA) */
+@keyframes walk-x {
+  0%   { left: 0%; }
+  50%  { left: calc(100% - 40px); }
+  100% { left: 0%; }
+}
+@keyframes walk-flip {
+  /* 1ª mitad: se mueve a la derecha → espejo (la animación base camina a la izquierda) */
+  0%, 49.99% { transform: scaleX(-1); }
+  /* 2ª mitad: se mueve a la izquierda → orientación natural */
+  50%, 100%  { transform: scaleX(1); }
+}

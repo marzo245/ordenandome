@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -14,7 +14,6 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import type { Task, TaskPriority, TaskStatus, TaskType } from '@/lib/types';
-import TaskPlannerModal from './TaskPlannerModal';
 import TaskDetailModal from './TaskDetailModal';
 import TaskCalendar from './TaskCalendar';
 
@@ -47,11 +46,16 @@ const TYPE_FILTERS: { key: TaskType | 'todos'; label: string }[] = [
 
 export default function TaskBoard({ initial }: { initial: Task[] }) {
   const [tasks, setTasks] = useState<Task[]>(initial);
-  const [plannerOpen, setPlannerOpen] = useState(false);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [view, setView] = useState<'board' | 'calendar'>('board');
   const [typeFilter, setTypeFilter] = useState<TaskType | 'todos'>('todos');
+
+  // Sincroniza el estado local cuando cambian las props (p.ej. tras router.refresh()
+  // disparado por el botón global de "nueva tarea con IA").
+  useEffect(() => {
+    setTasks(initial);
+  }, [initial]);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 4 } }),
@@ -149,22 +153,6 @@ export default function TaskBoard({ initial }: { initial: Task[] }) {
           </button>
         </div>
       )}
-
-      {/* Botón flotante que levita: nueva tarea con IA (primario) */}
-      <button
-        onClick={() => setPlannerOpen(true)}
-        title="Nueva tarea con IA"
-        aria-label="Nueva tarea con IA"
-        className="fixed bottom-6 right-44 z-40 w-14 h-14 rounded-full bg-[var(--accent)] hover:bg-[var(--accent-dim)] text-white shadow-lg flex items-center justify-center text-2xl transition-shadow hover:shadow-xl animate-[levitate_3s_ease-in-out_infinite]"
-      >
-        ✨
-      </button>
-
-      <TaskPlannerModal
-        open={plannerOpen}
-        onClose={() => setPlannerOpen(false)}
-        onCreated={(created) => setTasks((t) => [...created, ...t])}
-      />
 
       <div className="flex items-center flex-wrap gap-1 mb-4">
         {TYPE_FILTERS.map((f) => (

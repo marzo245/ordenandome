@@ -1,27 +1,64 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { KoEntry } from '@/db';
-import type { KoAiResult, KoDraft } from '@/lib/ko-ai';
+import GuitoWalker from './GuitoWalker';
+import type { KoAiResult, KoBulkEdit, KoDraft } from '@/lib/ko-ai';
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 
-interface Props {
-  open: boolean;
-  onClose: () => void;
-  entries: KoEntry[];
-  onApplied: (entry: KoEntry) => void;
+/* ------------------------------------------------------------------ */
+/* Markdown rendering (mismo patrón que KoManager / DailySummary)      */
+/* ------------------------------------------------------------------ */
+
+const MD_COMPONENTS = {
+  h1: (p: object) => <h3 className="font-semibold text-[var(--text)] mt-3 mb-1" {...p} />,
+  h2: (p: object) => <h3 className="font-semibold text-[var(--text)] mt-3 mb-1" {...p} />,
+  h3: (p: object) => <h3 className="font-semibold text-[var(--text)] mt-3 mb-1" {...p} />,
+  p: (p: object) => <p className="mb-2 last:mb-0" {...p} />,
+  strong: (p: object) => <strong className="font-semibold text-[var(--text)]" {...p} />,
+  em: (p: object) => <em className="italic text-[var(--muted)]" {...p} />,
+  ul: (p: object) => <ul className="list-disc list-outside ml-5 space-y-0.5 mb-2" {...p} />,
+  ol: (p: object) => <ol className="list-decimal list-outside ml-5 space-y-1 mb-2" {...p} />,
+  li: (p: object) => <li className="text-[var(--text)]" {...p} />,
+  a: (p: object) => (
+    <a className="text-[var(--accent)] hover:underline" target="_blank" rel="noreferrer" {...p} />
+  ),
+  code: (p: object) => (
+    <code
+      className="mono text-xs bg-[var(--bg)] px-1 py-0.5 border border-[var(--border)]"
+      {...p}
+    />
+  ),
+  hr: () => <hr className="border-[var(--border)] my-3" />,
+};
+
+function AssistantMarkdown({ value }: { value: string }) {
+  return (
+    <div className="text-sm leading-relaxed">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+        {value}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 const PLACEHOLDER =
-  'Pega un mensaje de error del sistema o describe un KO. La IA lo normaliza, lo clasifica y propone crearlo o editar uno existente.';
+  'Pregunta por los KO existentes, pide categorizar varios a la vez, o pega un error nuevo para crearlo.';
 
-export default function KoAiChat({ open, onClose, entries, onApplied }: Props) {
+export default function KoAiChat({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const router = useRouter();
+  const [entries, setEntries] = useState<KoEntry[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<KoAiResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [bulkStatus, setBulkStatus] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -32,10 +69,31 @@ export default function KoAiChat({ open, onClose, entries, onApplied }: Props) {
     setInput('');
     setError(null);
     setProposal(null);
+    setBulkStatus(null);
   }
 
   useEffect(() => {
     if (open) requestAnimationFrame(() => inputRef.current?.focus());
+  }, [open]);
+
+  // Carga las entries por su cuenta cada vez que se abre el chat; se usan para
+  // resolver targets en propose_edit/propose_bulk_edit.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/ko');
+        if (!res.ok) return;
+        const data = (await res.json()) as KoEntry[];
+        if (!cancelled && Array.isArray(data)) setEntries(data);
+      } catch {
+        /* silencioso: el chat sigue usable aunque falle el fetch de targets */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
   useEffect(() => {
@@ -55,6 +113,7 @@ export default function KoAiChat({ open, onClose, entries, onApplied }: Props) {
     setLoading(true);
     setError(null);
     setProposal(null);
+    setBulkStatus(null);
 
     try {
       const res = await fetch('/api/ko/ai', {
@@ -68,9 +127,14 @@ export default function KoAiChat({ open, onClose, entries, onApplied }: Props) {
       }
 
       setMessages((m) => [...m, { role: 'assistant', content: data.message }]);
-      if (data.action === 'propose_create' || data.action === 'propose_edit') {
+      if (
+        data.action === 'propose_create' ||
+        data.action === 'propose_edit' ||
+        data.action === 'propose_bulk_edit'
+      ) {
         setProposal(data);
       } else {
+        // clarify y answer son solo lectura: no dejan proposal pendiente.
         setProposal(null);
       }
     } catch (e) {
@@ -108,7 +172,7 @@ export default function KoAiChat({ open, onClose, entries, onApplied }: Props) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error((data as { error?: string }).error ?? `POST falló (${res.status})`);
-      onApplied(data as KoEntry);
+      router.refresh();
       resetConversation();
       onClose();
     } catch (e) {
@@ -137,13 +201,46 @@ export default function KoAiChat({ open, onClose, entries, onApplied }: Props) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error((data as { error?: string }).error ?? `PATCH falló (${res.status})`);
-      onApplied(data as KoEntry);
+      router.refresh();
       resetConversation();
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al aplicar');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function applyBulk(edits: KoBulkEdit[]) {
+    setBusy(true);
+    setError(null);
+    setBulkStatus(null);
+    let ok = 0;
+    let failed = 0;
+    for (const edit of edits) {
+      try {
+        const res = await fetch(`/api/ko/${edit.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(edit.patch),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error((data as { error?: string }).error ?? `PATCH falló (${res.status})`);
+        ok += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    setBusy(false);
+    if (ok > 0) router.refresh();
+    if (failed === 0) {
+      // Todos aplicados: limpiamos la conversación y cerramos.
+      resetConversation();
+      onClose();
+    } else {
+      // Quedan fallos: dejamos el resumen y descartamos el proposal.
+      setProposal(null);
+      setBulkStatus(`✓ ${ok} aplicados · ${failed} fallaron`);
     }
   }
 
@@ -181,6 +278,9 @@ export default function KoAiChat({ open, onClose, entries, onApplied }: Props) {
           </div>
         </header>
 
+        {/* GUITO camina mientras escribes o la IA piensa */}
+        <GuitoWalker walking={input.trim().length > 0 || loading} />
+
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.length === 0 && (
             <p className="text-sm text-[var(--muted)]">{PLACEHOLDER}</p>
@@ -188,18 +288,25 @@ export default function KoAiChat({ open, onClose, entries, onApplied }: Props) {
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div
-                className={`max-w-[80%] px-3 py-2 text-sm whitespace-pre-wrap rounded-lg ${
+                className={`max-w-[80%] px-3 py-2 text-sm rounded-lg ${
                   m.role === 'user'
-                    ? 'bg-[var(--accent)] text-white'
+                    ? 'bg-[var(--accent)] text-white whitespace-pre-wrap'
                     : 'bg-[var(--surface)] border border-[var(--border)]'
                 }`}
               >
-                {m.content}
+                {m.role === 'assistant' ? (
+                  <AssistantMarkdown value={m.content} />
+                ) : (
+                  m.content
+                )}
               </div>
             </div>
           ))}
           {loading && <div className="text-xs text-[var(--muted)] mono">pensando…</div>}
           {error && <div className="text-xs text-[var(--danger)] mono">{error}</div>}
+          {bulkStatus && (
+            <div className="text-xs text-[var(--muted)] mono">{bulkStatus}</div>
+          )}
         </div>
 
         {proposal && proposal.action === 'propose_create' && (
@@ -282,6 +389,45 @@ export default function KoAiChat({ open, onClose, entries, onApplied }: Props) {
               </ProposalBox>
             );
           })()
+        )}
+
+        {proposal && proposal.action === 'propose_bulk_edit' && (
+          <ProposalBox>
+            <div className="text-xs text-[var(--muted)] mono">
+              {proposal.edits.length} {proposal.edits.length === 1 ? 'cambio' : 'cambios'}
+            </div>
+            <ul className="max-h-52 overflow-y-auto space-y-1.5">
+              {proposal.edits.map((edit, i) => (
+                <li key={edit.id ?? i} className="text-sm flex gap-2 items-baseline">
+                  <span className="mono text-xs text-[var(--muted)] shrink-0">
+                    {edit.codigo || 'sin código'}
+                  </span>
+                  <span className="text-[var(--muted)]">→</span>
+                  <span className="text-[var(--text)] min-w-0 break-words">
+                    {formatPatchInline(edit.patch)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={() => applyBulk(proposal.edits)}
+                disabled={busy || loading}
+                className="bg-[var(--accent)] text-white rounded px-4 py-1.5 text-sm hover:opacity-90 disabled:opacity-50"
+              >
+                {busy
+                  ? 'Aplicando…'
+                  : `Aplicar ${proposal.edits.length} ${proposal.edits.length === 1 ? 'cambio' : 'cambios'}`}
+              </button>
+              <button
+                onClick={() => setProposal(null)}
+                disabled={busy || loading}
+                className="border border-[var(--border)] rounded px-4 py-1.5 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          </ProposalBox>
         )}
 
         <div className="border-t border-[var(--border)] p-3">
@@ -414,6 +560,21 @@ function PatchPreview({ patch }: { patch: Partial<KoDraft> }) {
       })}
     </div>
   );
+}
+
+function formatPatchInline(patch: Partial<KoDraft>): string {
+  const keys = Object.keys(patch) as (keyof KoDraft)[];
+  if (keys.length === 0) return 'sin cambios';
+  return keys
+    .map((k) => {
+      const v = patch[k];
+      let display: string;
+      if (Array.isArray(v)) display = v.join(', ');
+      else if (v == null || v === '') display = '—';
+      else display = summarize(String(v));
+      return `${PATCH_LABELS[k]}: ${display}`;
+    })
+    .join(', ');
 }
 
 function summarize(s: string): string {
