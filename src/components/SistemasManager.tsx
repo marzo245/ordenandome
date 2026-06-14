@@ -716,6 +716,7 @@ function AccionesTab({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sistemaFilter, setSistemaFilter] = useState('Todos');
+  const [suggesting, setSuggesting] = useState(false);
 
   const sistemaName = useMemo(() => {
     const map = new Map<string, string>();
@@ -883,6 +884,60 @@ function AccionesTab({
     const next = [...buffer.pasos];
     [next[i], next[j]] = [next[j], next[i]];
     upd({ pasos: next });
+  }
+
+  // Pide a la IA que proponga los pasos del flujo y los añade al buffer.
+  async function suggestPasos() {
+    if (!buffer) return;
+    if (!buffer.titulo.trim()) {
+      setError('Ponle un título a la acción para que la IA proponga pasos.');
+      return;
+    }
+    setSuggesting(true);
+    setError(null);
+    try {
+      const sistemaInicial =
+        items.find((s) => s.id === buffer.sistema_id)?.nombre ?? null;
+      const res = await fetch('/api/sistemas/secciones/suggest-pasos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          titulo: buffer.titulo,
+          contenido: buffer.contenido,
+          sistemaInicial,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `falló (${res.status})`);
+      const suggested = (data.pasos ?? []) as {
+        sistema: string;
+        accion: string;
+        dato: string;
+      }[];
+      const byName = new Map(
+        items.map((s) => [(s.nombre ?? '').trim().toLowerCase(), s.id]),
+      );
+      const mapped: AccionPaso[] = suggested
+        .map((p) => ({
+          sistema_id:
+            byName.get((p.sistema ?? '').trim().toLowerCase()) ??
+            buffer.sistema_id ??
+            items[0]?.id ??
+            '',
+          accion: p.accion ?? '',
+          dato: p.dato ?? '',
+        }))
+        .filter((p) => p.sistema_id);
+      if (mapped.length === 0) {
+        setError('La IA no sugirió pasos. Prueba con un título o detalle más claro.');
+        return;
+      }
+      upd({ pasos: [...buffer.pasos, ...mapped] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error sugiriendo pasos');
+    } finally {
+      setSuggesting(false);
+    }
   }
 
   return (
@@ -1107,13 +1162,24 @@ function AccionesTab({
                       <label className={`${labelCls} mb-0`}>
                         Flujo entre sistemas
                       </label>
-                      <button
-                        type="button"
-                        onClick={addPaso}
-                        className="text-sm px-2 py-1 rounded text-[var(--accent)] hover:bg-[var(--surface-hover)]"
-                      >
-                        + Paso
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={suggestPasos}
+                          disabled={suggesting}
+                          title="Proponer los pasos del flujo con IA"
+                          className="text-sm px-2 py-1 rounded text-[var(--accent)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
+                        >
+                          {suggesting ? '✨ pensando…' : '✨ con IA'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={addPaso}
+                          className="text-sm px-2 py-1 rounded text-[var(--accent)] hover:bg-[var(--surface-hover)]"
+                        >
+                          + Paso
+                        </button>
+                      </div>
                     </div>
                     <p className="text-xs text-[var(--muted)] mb-3">
                       Si la acción atraviesa varios sistemas: añade un paso por

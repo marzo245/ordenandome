@@ -216,6 +216,66 @@ function looksLikeQuestion(
   );
 }
 
+const PASOS_SYSTEM = (nombres: string) => `Eres un asistente que diseña el FLUJO de una acción operativa que puede ATRAVESAR VARIOS SISTEMAS. Hablas en español.
+
+Te dan el título de una acción y (opcional) su detalle. Devuelves los PASOS ORDENADOS del flujo: en qué sistema ocurre cada paso, qué se hace ahí y qué DATO se obtiene para llevar al siguiente paso.
+
+## Sistemas disponibles (usa los nombres EXACTOS de esta lista)
+${nombres}
+
+## Reglas
+- Usa SOLO sistemas de la lista. No inventes sistemas.
+- Ordena los pasos en el orden lógico del flujo. El primer paso es donde empieza la acción.
+- "dato" = el dato que se obtiene en ese paso y se usa en el siguiente (o "" si no aplica).
+- Si la acción es de un solo sistema, devuelve un único paso.
+- No inventes datos que no se deduzcan del contexto; si dudas, deja "dato" en "".
+
+## Salida — SOLO JSON válido, sin texto alrededor
+{"pasos":[{"sistema":"<nombre exacto>","accion":"<qué se hace>","dato":"<dato para el siguiente paso o ''>"}]}`;
+
+/** Sugiere los pasos del flujo de una acción (sistemas por NOMBRE). */
+export async function suggestAccionPasos(
+  input: { titulo: string; contenido?: string | null; sistemaInicial?: string | null },
+  sistemas: Sistema[]
+): Promise<AccionDraftPaso[]> {
+  const nombres =
+    sistemas.length > 0
+      ? sistemas.map((s) => `- ${s.nombre}`).join('\n')
+      : '(sin sistemas: no puedes proponer pasos)';
+  if (sistemas.length === 0) return [];
+
+  const user = JSON.stringify({
+    titulo: input.titulo,
+    detalle: input.contenido ?? '',
+    sistema_inicial: input.sistemaInicial ?? null,
+  });
+
+  const result = await runAgent({
+    system: PASOS_SYSTEM(nombres),
+    messages: [{ role: 'user', content: user }],
+    temperature: 0.3,
+    responseFormat: 'json_object',
+    tools: false,
+  });
+
+  function extractJson(raw: string): string {
+    let s = (raw ?? '').trim();
+    const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fence) s = fence[1].trim();
+    const first = s.indexOf('{');
+    const last = s.lastIndexOf('}');
+    if (first >= 0 && last > first) s = s.slice(first, last + 1);
+    return s;
+  }
+
+  try {
+    const parsed = JSON.parse(extractJson(result.content)) as { pasos?: unknown };
+    return normalizeAccionPasos(parsed.pasos);
+  } catch {
+    return [];
+  }
+}
+
 export async function sistemasAssistant(
   messages: { role: 'user' | 'assistant'; content: string; images?: string[] }[],
   sistemas: Sistema[],
