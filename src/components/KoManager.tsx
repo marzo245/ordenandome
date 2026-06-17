@@ -68,11 +68,29 @@ function SubLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Chip({ children }: { children: React.ReactNode }) {
+function Chip({
+  children,
+  onClick,
+  title,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  title?: string;
+}) {
+  const base =
+    'inline-block text-xs px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]';
+  if (!onClick) {
+    return <span className={base}>{children}</span>;
+  }
   return (
-    <span className="inline-block text-xs px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]">
-      {children}
-    </span>
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className={`${base} cursor-pointer transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]`}
+    >
+      {children} <span aria-hidden="true">↗</span>
+    </button>
   );
 }
 
@@ -95,6 +113,8 @@ export default function KoManager({
   initialSubprocesos: KoSubproceso[];
 }) {
   const [tab, setTab] = useState<'catalogo' | 'subprocesos'>('catalogo');
+  // Subproceso a abrir al navegar desde un caso del catálogo (deep-link entre tabs).
+  const [openSubprocesoId, setOpenSubprocesoId] = useState<string | null>(null);
 
   return (
     <div className="flex flex-col gap-5">
@@ -112,9 +132,20 @@ export default function KoManager({
       </div>
 
       {tab === 'catalogo' ? (
-        <CatalogoTab initial={initialEntries} />
+        <CatalogoTab
+          initial={initialEntries}
+          subprocesos={initialSubprocesos}
+          onOpenSubproceso={(id) => {
+            setOpenSubprocesoId(id);
+            setTab('subprocesos');
+          }}
+        />
       ) : (
-        <SubprocesosTab initial={initialSubprocesos} />
+        <SubprocesosTab
+          initial={initialSubprocesos}
+          openId={openSubprocesoId}
+          onOpened={() => setOpenSubprocesoId(null)}
+        />
       )}
     </div>
   );
@@ -182,7 +213,15 @@ function entryToBuffer(e: KoEntry): EntryBuffer {
   };
 }
 
-function CatalogoTab({ initial }: { initial: KoEntry[] }) {
+function CatalogoTab({
+  initial,
+  subprocesos,
+  onOpenSubproceso,
+}: {
+  initial: KoEntry[];
+  subprocesos: KoSubproceso[];
+  onOpenSubproceso: (id: string) => void;
+}) {
   const [entries, setEntries] = useState<KoEntry[]>(initial);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -441,7 +480,13 @@ function CatalogoTab({ initial }: { initial: KoEntry[] }) {
                 onRemove={remove}
               />
             ) : (
-              <EntryView selected={selected} onEdit={startEdit} onClose={() => setSelectedId(null)} />
+              <EntryView
+                selected={selected}
+                subprocesos={subprocesos}
+                onEdit={startEdit}
+                onClose={() => setSelectedId(null)}
+                onOpenSubproceso={onOpenSubproceso}
+              />
             )}
           </div>
         </div>
@@ -452,14 +497,28 @@ function CatalogoTab({ initial }: { initial: KoEntry[] }) {
 
 function EntryView({
   selected,
+  subprocesos,
   onEdit,
   onClose,
+  onOpenSubproceso,
 }: {
   selected: KoEntry;
+  subprocesos: KoSubproceso[];
   onEdit: () => void;
   onClose: () => void;
+  onOpenSubproceso: (id: string) => void;
 }) {
   const subs = selected.subprocesos ?? [];
+  // El array `subprocesos` del KO guarda códigos (p. ej. SP-001); resolvemos
+  // contra el catálogo por código y, como respaldo, por nombre.
+  function resolveSub(ref: string): KoSubproceso | null {
+    const r = ref.trim().toLowerCase();
+    return (
+      subprocesos.find((s) => (s.codigo ?? '').toLowerCase() === r) ??
+      subprocesos.find((s) => (s.nombre ?? '').toLowerCase() === r) ??
+      null
+    );
+  }
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-start justify-between gap-3">
@@ -518,9 +577,20 @@ function EntryView({
         <div>
           <SubLabel>Subprocesos</SubLabel>
           <div className="flex flex-wrap gap-1.5">
-            {subs.map((s) => (
-              <Chip key={s}>{s}</Chip>
-            ))}
+            {subs.map((s) => {
+              const match = resolveSub(s);
+              return match ? (
+                <Chip
+                  key={s}
+                  onClick={() => onOpenSubproceso(match.id)}
+                  title={`Ir al subproceso ${match.codigo} — ${match.nombre}`}
+                >
+                  {s}
+                </Chip>
+              ) : (
+                <Chip key={s}>{s}</Chip>
+              );
+            })}
           </div>
         </div>
       )}
@@ -770,7 +840,15 @@ function spToBuffer(s: KoSubproceso): SpBuffer {
   };
 }
 
-function SubprocesosTab({ initial }: { initial: KoSubproceso[] }) {
+function SubprocesosTab({
+  initial,
+  openId,
+  onOpened,
+}: {
+  initial: KoSubproceso[];
+  openId?: string | null;
+  onOpened?: () => void;
+}) {
   const [subprocesos, setSubprocesos] = useState<KoSubproceso[]>(initial);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -781,6 +859,17 @@ function SubprocesosTab({ initial }: { initial: KoSubproceso[] }) {
   useEffect(() => {
     setSubprocesos(initial);
   }, [initial]);
+
+  // Deep-link desde el catálogo: al llegar con un `openId`, abrimos ese
+  // subproceso y consumimos la petición (para no re-seleccionar en cada render).
+  useEffect(() => {
+    if (!openId) return;
+    setSelectedId(openId);
+    setEditing(false);
+    setBuffer(null);
+    setError(null);
+    onOpened?.();
+  }, [openId, onOpened]);
 
   const selected = useMemo(
     () => subprocesos.find((s) => s.id === selectedId) ?? null,
