@@ -16,19 +16,27 @@ import type {
 type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
-  images?: string[]; // data URLs base64 de capturas adjuntas
+  /** URLs de capturas que SÍ se mandaron a analizar (solo al pulsar «Analizar»). */
+  images?: string[];
 };
 
-const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB por imagen
 
-function readFileAsDataURL(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error ?? new Error('No se pudo leer la imagen'));
-    reader.readAsDataURL(file);
-  });
+/** Sube una imagen al host (imgbb→catbox) y devuelve su URL pública. */
+async function uploadImage(file: File): Promise<string> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch('/api/notes/upload-image', { method: 'POST', body: fd });
+  const data = await res.json();
+  if (!res.ok || !data.url) {
+    throw new Error((data as { error?: string }).error ?? 'No se pudo subir la imagen');
+  }
+  return data.url as string;
+}
+
+/** Extrae las URLs de las imágenes markdown `![..](url)` presentes en un texto. */
+function extractImageUrls(text: string): string[] {
+  return [...text.matchAll(/!\[[^\]]*\]\(([^)\s]+)\)/g)].map((m) => m[1]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -54,6 +62,10 @@ const MD_COMPONENTS = {
       {...p}
     />
   ),
+  img: (p: object) => (
+    // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
+    <img className="max-h-48 rounded border border-[var(--border)] my-2" alt="" {...p} />
+  ),
   hr: () => <hr className="border-[var(--border)] my-3" />,
 };
 
@@ -68,7 +80,7 @@ function AssistantMarkdown({ value }: { value: string }) {
 }
 
 const PLACEHOLDER =
-  'Pregunta por los sistemas (OPERA, eCO, Salesforce, ForceBeat, Beats, SAP), documenta uno nuevo, crea acciones, o pide editar una acción existente (p. ej. «agrega a «Crear cuenta» un paso en SAP»).';
+  'Pregunta por los sistemas (OPERA, eCO, Salesforce, ForceBeat, Beats, SAP), documenta uno nuevo, crea o edita acciones. Pega una captura para incrustarla; usa «Analizar» si quieres que la IA la lea.';
 
 /**
  * Modal del asistente de IA de Sistemas (GUITO en `/sistemas`). Chat multimodal
@@ -90,11 +102,13 @@ export default function SistemasAiChat({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<SistemaAiResult | null>(null);
-  const [attachments, setAttachments] = useState<string[]>([]);
-  const [keepImages, setKeepImages] = useState(true);
+  const [uploading, setUploading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // ¿Hay alguna imagen (link markdown) en lo que está escrito? Habilita «Analizar».
+  const inputHasImages = extractImageUrls(input).length > 0;
 
   // Al cerrar NO borramos la conversación: solo se limpia tras aplicar con
   // éxito o con el botón "nueva conversación".
@@ -103,35 +117,46 @@ export default function SistemasAiChat({
     setInput('');
     setError(null);
     setProposal(null);
-    setAttachments([]);
   }
 
-  async function addFiles(files: FileList | File[]) {
+  // Inserta texto en la posición del cursor del textarea (o al final).
+  function insertAtCursor(snippet: string) {
+    const ta = inputRef.current;
+    setInput((prev) => {
+      const start = ta?.selectionStart ?? prev.length;
+      const end = ta?.selectionEnd ?? prev.length;
+      const next = prev.slice(0, start) + snippet + prev.slice(end);
+      requestAnimationFrame(() => {
+        if (!ta) return;
+        ta.focus();
+        const pos = start + snippet.length;
+        ta.setSelectionRange(pos, pos);
+      });
+      return next;
+    });
+  }
+
+  // Sube cada captura y la inserta como link markdown en el cuadro de texto.
+  // Por defecto NO se analiza: queda como imagen incrustada (como en markdown).
+  async function addImages(files: FileList | File[]) {
     const list = Array.from(files).filter((f) => f.type.startsWith('image/'));
     if (list.length === 0) return;
     setError(null);
     for (const file of list) {
-      if (attachments.length >= MAX_IMAGES) {
-        setError(`Máximo ${MAX_IMAGES} imágenes por mensaje.`);
-        break;
-      }
       if (file.size > MAX_IMAGE_BYTES) {
         setError(`"${file.name || 'imagen'}" supera 5MB.`);
         continue;
       }
       try {
-        const dataUrl = await readFileAsDataURL(file);
-        setAttachments((prev) =>
-          prev.length >= MAX_IMAGES ? prev : [...prev, dataUrl],
-        );
-      } catch {
-        setError('No se pudo leer la imagen.');
+        setUploading(true);
+        const url = await uploadImage(file);
+        insertAtCursor(`\n![captura](${url})\n`);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'No se pudo subir la imagen.');
+      } finally {
+        setUploading(false);
       }
     }
-  }
-
-  function removeAttachment(i: number) {
-    setAttachments((prev) => prev.filter((_, j) => j !== i));
   }
 
   function onPaste(e: React.ClipboardEvent) {
@@ -140,7 +165,7 @@ export default function SistemasAiChat({
     );
     if (imgs.length > 0) {
       e.preventDefault();
-      void addFiles(imgs);
+      void addImages(imgs);
     }
   }
 
@@ -179,19 +204,21 @@ export default function SistemasAiChat({
     });
   }, [messages]);
 
-  async function send() {
+  // analyze=false → texto plano (los links de imagen viajan como markdown, va a Groq).
+  // analyze=true  → además manda las imágenes a la IA para que las lea (Gemini).
+  async function send(analyze = false) {
     const text = input.trim();
-    if ((!text && attachments.length === 0) || loading) return;
+    if (!text || loading) return;
 
+    const imageUrls = analyze ? extractImageUrls(text) : [];
     const userMsg: ChatMessage = {
       role: 'user',
-      content: text || (attachments.length ? '(captura adjunta)' : ''),
-      ...(attachments.length ? { images: attachments } : {}),
+      content: text,
+      ...(imageUrls.length ? { images: imageUrls } : {}),
     };
     const nextMessages: ChatMessage[] = [...messages, userMsg];
     setMessages(nextMessages);
     setInput('');
-    setAttachments([]);
     setLoading(true);
     setError(null);
     setProposal(null);
@@ -236,35 +263,15 @@ export default function SistemasAiChat({
     };
   }
 
-  // ¿Hubo capturas en la conversación? (para ofrecer conservarlas en la doc)
-  const hasConversationImages = messages.some((m) => m.images && m.images.length > 0);
-
-  function conversationImages(): string[] {
-    return messages.flatMap((m) => m.images ?? []);
-  }
-
-  // Sube un data URL al host de imágenes y devuelve la URL pública.
-  async function uploadDataUrl(dataUrl: string, i: number): Promise<string> {
-    const blob = await (await fetch(dataUrl)).blob();
-    const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
-    const file = new File([blob], `captura-${i + 1}.${ext}`, { type: blob.type });
-    const fd = new FormData();
-    fd.append('file', file);
-    const res = await fetch('/api/notes/upload-image', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (!res.ok || !data.url) {
-      throw new Error((data as { error?: string }).error ?? 'No se pudo subir la captura');
-    }
-    return data.url as string;
-  }
-
-  // Si el usuario quiere conservar las capturas, las sube y las embebe en el markdown.
-  async function withKeptImages(contenido: string | null): Promise<string | null> {
-    if (!keepImages || !hasConversationImages) return contenido;
-    const imgs = conversationImages();
-    const urls = await Promise.all(imgs.map((d, i) => uploadDataUrl(d, i)));
-    const embeds = urls.map((u, i) => `![captura ${i + 1}](${u})`).join('\n');
+  // Une las capturas que el usuario incrustó en la conversación (links markdown)
+  // dentro del contenido, sin duplicar las que el borrador ya incluya.
+  function withConversationImages(contenido: string | null): string | null {
+    const urls = [...new Set(messages.flatMap((m) => extractImageUrls(m.content)))];
+    if (urls.length === 0) return contenido;
     const base = (contenido ?? '').trim();
+    const faltantes = urls.filter((u) => !base.includes(u));
+    if (faltantes.length === 0) return contenido;
+    const embeds = faltantes.map((u, i) => `![captura ${i + 1}](${u})`).join('\n');
     return base ? `${base}\n\n${embeds}` : embeds;
   }
 
@@ -272,7 +279,7 @@ export default function SistemasAiChat({
     setLoading(true);
     setError(null);
     try {
-      const contenido = await withKeptImages(body.contenido ?? null);
+      const contenido = withConversationImages(body.contenido ?? null);
       const res = await fetch('/api/sistemas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -325,7 +332,7 @@ export default function SistemasAiChat({
     setError(null);
     try {
       const pasos = mapPasos(draft.pasos ?? []);
-      const contenido = await withKeptImages(draft.contenido);
+      const contenido = withConversationImages(draft.contenido);
       const res = await fetch('/api/sistemas/secciones', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -406,19 +413,6 @@ export default function SistemasAiChat({
 
   if (!open) return null;
 
-  // Toggle para conservar las capturas en la documentación (solo si hubo imágenes).
-  const keepImagesToggle = hasConversationImages ? (
-    <label className="flex items-center gap-2 text-xs text-[var(--muted)] pt-1 cursor-pointer select-none">
-      <input
-        type="checkbox"
-        checked={keepImages}
-        onChange={(e) => setKeepImages(e.target.checked)}
-        className="accent-[var(--accent)]"
-      />
-      Conservar la(s) captura(s) en la documentación
-    </label>
-  ) : null;
-
   return (
     <div
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
@@ -452,7 +446,7 @@ export default function SistemasAiChat({
         </header>
 
         {/* GUITO camina mientras escribes o la IA piensa */}
-        <GuitoWalker walking={input.trim().length > 0 || attachments.length > 0 || loading} />
+        <GuitoWalker walking={input.trim().length > 0 || loading} />
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.length === 0 && (
@@ -470,22 +464,30 @@ export default function SistemasAiChat({
                 {m.role === 'assistant' ? (
                   <AssistantMarkdown value={m.content} />
                 ) : (
-                  <>
-                    {m.images && m.images.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mb-1.5">
-                        {m.images.map((src, j) => (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            key={j}
-                            src={src}
-                            alt={`captura ${j + 1}`}
-                            className="max-h-32 rounded border border-white/30 object-contain"
-                          />
-                        ))}
-                      </div>
-                    )}
-                    {m.content}
-                  </>
+                  (() => {
+                    const imgs = extractImageUrls(m.content);
+                    const textOnly = imgs.length
+                      ? m.content.replace(/!\[[^\]]*\]\([^)\s]+\)/g, '').replace(/\n{2,}/g, '\n').trim()
+                      : m.content;
+                    return (
+                      <>
+                        {imgs.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mb-1.5">
+                            {imgs.map((src, j) => (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                key={j}
+                                src={src}
+                                alt={`captura ${j + 1}`}
+                                className="max-h-32 rounded border border-white/30 object-contain"
+                              />
+                            ))}
+                          </div>
+                        )}
+                        {textOnly}
+                      </>
+                    );
+                  })()
                 )}
               </div>
             </div>
@@ -497,7 +499,6 @@ export default function SistemasAiChat({
         {proposal && proposal.action === 'propose_create' && (
           <ProposalBox>
             <CreatePreview draft={proposal.draft} />
-            {keepImagesToggle}
             <div className="flex gap-2 pt-2">
               <button
                 onClick={() => createFrom(draftToBody(proposal.draft))}
@@ -596,7 +597,6 @@ export default function SistemasAiChat({
                   Nueva acción en {target.nombre}
                 </div>
                 <AccionPreview draft={proposal.draft} />
-                {keepImagesToggle}
                 <div className="flex gap-2 pt-2">
                   <button
                     onClick={() => createAccion(target, proposal.draft)}
@@ -689,28 +689,8 @@ export default function SistemasAiChat({
         )}
 
         <div className="border-t border-[var(--border)] p-3">
-          {/* Miniaturas de capturas adjuntas pendientes de enviar */}
-          {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {attachments.map((src, i) => (
-                <div key={i} className="relative">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={src}
-                    alt={`adjunto ${i + 1}`}
-                    className="h-16 w-16 object-cover rounded border border-[var(--border)]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removeAttachment(i)}
-                    className="absolute -top-1.5 -right-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-full w-5 h-5 text-xs leading-none text-[var(--muted)] hover:text-[var(--danger)]"
-                    title="Quitar imagen"
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-            </div>
+          {uploading && (
+            <div className="text-xs text-[var(--muted)] mono mb-2">subiendo captura…</div>
           )}
 
           <input
@@ -720,7 +700,7 @@ export default function SistemasAiChat({
             multiple
             className="hidden"
             onChange={(e) => {
-              if (e.target.files) void addFiles(e.target.files);
+              if (e.target.files) void addImages(e.target.files);
               e.target.value = '';
             }}
           />
@@ -729,8 +709,8 @@ export default function SistemasAiChat({
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              disabled={loading || attachments.length >= MAX_IMAGES}
-              title="Adjuntar captura (o pega con Ctrl/⌘+V)"
+              disabled={loading || uploading}
+              title="Adjuntar captura como imagen (o pega con Ctrl/⌘+V)"
               className="self-stretch px-3 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
             >
               📎
@@ -746,19 +726,33 @@ export default function SistemasAiChat({
                   send();
                 }
               }}
-              placeholder="Pregunta, describe o pega una captura… (⌘/Ctrl+Enter)"
+              placeholder="Pregunta o describe. Pega una captura para incrustarla; usa «Analizar» si quieres que la IA la lea. (⌘/Ctrl+Enter)"
               disabled={loading}
               rows={3}
               className="flex-1 bg-[var(--surface)] border border-[var(--border)] rounded px-3 py-2 outline-none focus:border-[var(--accent)] disabled:opacity-50 resize-y text-sm"
               autoFocus
             />
-            <button
-              onClick={send}
-              disabled={loading || (!input.trim() && attachments.length === 0)}
-              className="bg-[var(--accent)] text-white rounded px-4 hover:opacity-90 disabled:opacity-50 self-stretch"
-            >
-              Enviar
-            </button>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => send(false)}
+                disabled={loading || !input.trim()}
+                className="bg-[var(--accent)] text-white rounded px-4 py-1.5 text-sm hover:opacity-90 disabled:opacity-50"
+              >
+                Enviar
+              </button>
+              <button
+                onClick={() => send(true)}
+                disabled={loading || !inputHasImages}
+                title={
+                  inputHasImages
+                    ? 'Mandar la(s) captura(s) a la IA para que las lea (usa Gemini)'
+                    : 'Pega o adjunta una captura para poder analizarla'
+                }
+                className="border border-[var(--border)] rounded px-4 py-1.5 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-50"
+              >
+                Analizar
+              </button>
+            </div>
           </div>
         </div>
       </div>
