@@ -49,6 +49,7 @@ Toda llamada al LLM pasa por un único núcleo, **`runAgent()`** (`src/lib/ai-ag
 ```
 
 - **Failover por cuota:** si un proveedor devuelve `429` (límite diario de tokens agotado), `runAgent` salta al siguiente intento de la cadena automáticamente.
+- **Reintento transitorio:** ante `503/502/529` (modelo saturado) reintenta el mismo proveedor con backoff y, si persiste, pasa al siguiente.
 - **Multimodal:** si un mensaje lleva imágenes, se enruta a Gemini (Groq es solo texto).
 - **Asistentes de dominio** (`ko-ai`, `sistemas-ai`, `notes-ai`) devuelven un JSON con un campo `action` (`clarify`, `answer`, `propose_create`, `propose_edit`, …); el cliente renderiza la propuesta y, al confirmar, hace el POST/PATCH real.
 

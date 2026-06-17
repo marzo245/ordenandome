@@ -22,6 +22,23 @@ class RateLimitError extends Error {
   }
 }
 
+/**
+ * Se lanza ante errores transitorios del proveedor (503/502/529: sobrecarga o
+ * indisponibilidad temporal). A diferencia del 429 de cuota, suelen recuperarse
+ * en segundos, así que {@link runAgent} reintenta con backoff antes de fallar.
+ */
+class TransientError extends Error {
+  constructor(public provider: AiProvider, public status: number, public detail: string) {
+    super(`${provider} ${status}: ${detail}`);
+    this.name = 'TransientError';
+  }
+}
+
+/** Estados HTTP transitorios: el modelo está saturado o temporalmente caído. */
+const TRANSIENT_STATUSES = new Set([502, 503, 529]);
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /** Configuración resuelta de un proveedor: a dónde llamar, con qué modelo y auth. */
 interface ProviderConfig {
   endpoint: string;
@@ -148,17 +165,27 @@ export interface AgentResult {
  */
 export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
   const attempts = buildAttempts(opts.provider ?? 'groq');
+  const MAX_TRANSIENT_RETRIES = 2; // reintentos extra del mismo proveedor ante 503/502/529
   let lastErr: unknown;
   for (let i = 0; i < attempts.length; i++) {
     const { provider, key } = attempts[i];
-    try {
-      return await runAgentOnce({ ...opts, provider }, key);
-    } catch (e) {
-      lastErr = e;
-      // Failover por cuota (429): pasamos al siguiente intento (otra key de
-      // Groq, o finalmente Gemini). Cualquier otro error se propaga de inmediato.
-      if (e instanceof RateLimitError && i < attempts.length - 1) continue;
-      throw e;
+    const isLast = i === attempts.length - 1;
+    for (let retry = 0; ; retry++) {
+      try {
+        return await runAgentOnce({ ...opts, provider }, key);
+      } catch (e) {
+        lastErr = e;
+        // Error transitorio (sobrecarga): reintenta el MISMO proveedor con
+        // backoff antes de pasar al siguiente.
+        if (e instanceof TransientError && retry < MAX_TRANSIENT_RETRIES) {
+          await sleep(600 * (retry + 1)); // 0.6s, 1.2s
+          continue;
+        }
+        // 429 (cuota) o transitorio ya agotado: pasamos al siguiente intento
+        // (otra key de Groq, o finalmente Gemini) si queda alguno.
+        if ((e instanceof RateLimitError || e instanceof TransientError) && !isLast) break;
+        throw e;
+      }
     }
   }
   throw lastErr;
@@ -230,6 +257,8 @@ async function runAgentOnce(opts: RunAgentOptions, apiKey: string): Promise<Agen
       const errText = await res.text();
       // Cuota agotada → lo propagamos para que runAgent reintente en otro proveedor.
       if (res.status === 429) throw new RateLimitError(provider, errText);
+      // Sobrecarga/indisponibilidad temporal → runAgent reintenta con backoff.
+      if (TRANSIENT_STATUSES.has(res.status)) throw new TransientError(provider, res.status, errText);
       const canRetryWithoutTools =
         provider === 'groq' &&
         tools &&
@@ -268,6 +297,8 @@ async function runAgentOnce(opts: RunAgentOptions, apiKey: string): Promise<Agen
       if (!fallbackRes.ok) {
         const fbText = await fallbackRes.text();
         if (fallbackRes.status === 429) throw new RateLimitError(provider, fbText);
+        if (TRANSIENT_STATUSES.has(fallbackRes.status))
+          throw new TransientError(provider, fallbackRes.status, fbText);
         throw new Error(
           `${provider} ${res.status}: ${errText}\nFallback sin herramientas: ${fallbackRes.status}: ${fbText}`
         );
