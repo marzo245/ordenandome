@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { KoEntry, KoSubproceso } from '@/db';
+import MarkdownImageTextarea from './MarkdownImageTextarea';
 
 /* ------------------------------------------------------------------ */
 /* Markdown rendering (shared)                                         */
@@ -711,9 +712,9 @@ function EntryEditor({
 
       <div>
         <label className={labelCls}>Resolución (markdown)</label>
-        <textarea
+        <MarkdownImageTextarea
           value={buffer.resolucion}
-          onChange={(e) => upd({ resolucion: e.target.value })}
+          onChange={(v) => upd({ resolucion: v })}
           rows={5}
           className={textareaCls}
         />
@@ -721,9 +722,9 @@ function EntryEditor({
 
       <div>
         <label className={labelCls}>Documentación (markdown)</label>
-        <textarea
+        <MarkdownImageTextarea
           value={buffer.documentacion}
-          onChange={(e) => upd({ documentacion: e.target.value })}
+          onChange={(v) => upd({ documentacion: v })}
           rows={4}
           className={textareaCls}
         />
@@ -1018,9 +1019,9 @@ function SubprocesosTab({ initial }: { initial: KoSubproceso[] }) {
 
                 <div>
                   <label className={labelCls}>Cuándo aplicarlo (markdown)</label>
-                  <textarea
+                  <MarkdownImageTextarea
                     value={buffer.cuando_aplicar}
-                    onChange={(e) => upd({ cuando_aplicar: e.target.value })}
+                    onChange={(v) => upd({ cuando_aplicar: v })}
                     rows={3}
                     className={textareaCls}
                   />
@@ -1028,9 +1029,9 @@ function SubprocesosTab({ initial }: { initial: KoSubproceso[] }) {
 
                 <div>
                   <label className={labelCls}>Pasos (markdown)</label>
-                  <textarea
+                  <MarkdownImageTextarea
                     value={buffer.pasos}
-                    onChange={(e) => upd({ pasos: e.target.value })}
+                    onChange={(v) => upd({ pasos: v })}
                     rows={6}
                     className={textareaCls}
                   />
@@ -1038,9 +1039,9 @@ function SubprocesosTab({ initial }: { initial: KoSubproceso[] }) {
 
                 <div>
                   <label className={labelCls}>Documentación (markdown)</label>
-                  <textarea
+                  <MarkdownImageTextarea
                     value={buffer.documentacion}
-                    onChange={(e) => upd({ documentacion: e.target.value })}
+                    onChange={(v) => upd({ documentacion: v })}
                     rows={3}
                     className={textareaCls}
                   />
