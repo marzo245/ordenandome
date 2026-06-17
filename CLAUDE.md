@@ -68,6 +68,7 @@ src/lib/
 
 - **`runAgent`** (`src/lib/ai-agent.ts`) es el único punto de llamada al LLM. OpenAI-compatible para Groq y Gemini.
   - `provider: 'groq'` (default, texto) o `'gemini'` (multimodal / razonamiento). Groq `llama-3.3-70b` es **solo texto**: si hay imágenes, enruta a Gemini.
+  - **Failover por cuota (429):** `runAgent` arma una cadena de intentos con `buildAttempts()` y, si un proveedor devuelve `429` (rate limit / TPD agotado), pasa al siguiente. Para `provider: 'groq'` la cadena es **`GROQ_API_KEY` → `GROQ_API_KEY_2` → Gemini**; para `provider: 'gemini'` es solo Gemini (no cae de vuelta a Groq). `runAgentOnce(opts, apiKey)` ejecuta un intento concreto; cualquier error que no sea 429 se propaga de inmediato. ⚠️ Dos keys de Groq de la **misma organización** comparten la cuota TPD — para sumar tokens reales deben ser de cuentas/orgs distintas.
   - Soporta contenido multimodal: cada mensaje puede llevar `images?: string[]` (URLs o data URLs base64) → se mandan como partes `image_url`.
   - `responseFormat: 'json_object'` para asistentes que devuelven una `action`.
 - Los asistentes de dominio (`ko-ai`, `sistemas-ai`) devuelven un JSON con un campo `action` (`clarify` | `answer` | `propose_create` | `propose_edit` | `propose_create_accion` …). El cliente (chat) renderiza una propuesta y, al confirmar, hace el POST/PATCH real. La IA referencia entidades por **nombre**; el cliente las resuelve a `id`.
@@ -75,7 +76,7 @@ src/lib/
 
 ## Variables de entorno (`.env.local`)
 
-`DATABASE_URL`, `GROQ_API_KEY`/`GROQ_MODEL`, `GEMINI_API_KEY`/`GEMINI_MODEL`, `AUTH_SECRET`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `NEXTAUTH_URL`, `GITHUB_TOKEN`/`GITHUB_USERNAME`, `OBSIDIAN_VAULT_REPO`/`OBSIDIAN_VAULT_BRANCH`, `CRON_SECRET`, `IMGBB_API_KEY` (opcional; sin ella la subida de imágenes cae a catbox.moe). Ver `.env.example`.
+`DATABASE_URL`, `GROQ_API_KEY`/`GROQ_API_KEY_2` (opcional, failover de cuota)/`GROQ_MODEL`, `GEMINI_API_KEY`/`GEMINI_MODEL`, `AUTH_SECRET`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `NEXTAUTH_URL`, `GITHUB_TOKEN`/`GITHUB_USERNAME`, `OBSIDIAN_VAULT_REPO`/`OBSIDIAN_VAULT_BRANCH`, `CRON_SECRET`, `IMGBB_API_KEY` (opcional; sin ella la subida de imágenes cae a catbox.moe). Ver `.env.example`.
 
 ## Convenciones
 

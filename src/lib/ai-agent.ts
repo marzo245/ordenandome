@@ -1,30 +1,82 @@
+/**
+ * Núcleo de IA de la app: `runAgent()`.
+ *
+ * Único punto de llamada al LLM. Habla el formato OpenAI-compatible, por lo que
+ * sirve tanto para Groq (rápido, default) como para Gemini (multimodal /
+ * razonamiento). Implementa el bucle de tool-calling: pide al modelo, ejecuta
+ * las tools que pida, le devuelve los resultados y repite hasta `maxToolHops`.
+ *
+ * Soporta contenido multimodal (imágenes por mensaje) y `response_format`
+ * JSON para los asistentes de dominio que devuelven una `action`.
+ */
 import { TOOL_DEFS, TOOL_EXECUTORS, type ToolExecutor } from './ai-tools';
 
+/** Proveedores LLM soportados (ambos vía API OpenAI-compatible). */
 export type AiProvider = 'groq' | 'gemini';
 
+/** Se lanza cuando un proveedor devuelve 429 (cuota/rate limit agotado). */
+class RateLimitError extends Error {
+  constructor(public provider: AiProvider, public detail: string) {
+    super(`${provider} 429: ${detail}`);
+    this.name = 'RateLimitError';
+  }
+}
+
+/** Configuración resuelta de un proveedor: a dónde llamar, con qué modelo y auth. */
 interface ProviderConfig {
   endpoint: string;
   model: string;
   authHeader: string;
 }
 
-function providerConfig(provider: AiProvider): ProviderConfig {
+/** Un intento de la cadena de failover: proveedor + la API key concreta a usar. */
+interface Attempt {
+  provider: AiProvider;
+  key: string;
+}
+
+/**
+ * Resuelve endpoint, modelo y cabecera de auth para el proveedor dado,
+ * usando la API key concreta del intento.
+ */
+function providerConfig(provider: AiProvider, key: string): ProviderConfig {
   if (provider === 'gemini') {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) throw new Error('GEMINI_API_KEY no configurada');
     return {
       endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
       model: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
       authHeader: `Bearer ${key}`,
     };
   }
-  const key = process.env.GROQ_API_KEY;
-  if (!key) throw new Error('GROQ_API_KEY no configurada');
   return {
     endpoint: 'https://api.groq.com/openai/v1/chat/completions',
     model: process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile',
     authHeader: `Bearer ${key}`,
   };
+}
+
+/**
+ * Construye la cadena de intentos según el proveedor pedido y las keys del entorno.
+ * - `groq`: todas las keys de Groq en orden (`GROQ_API_KEY`, `GROQ_API_KEY_2`),
+ *   y al final Gemini como último recurso si está configurado.
+ * - `gemini`: solo Gemini (no cae de vuelta a Groq; suele elegirse por multimodal).
+ * Ante un 429, {@link runAgent} pasa al siguiente intento.
+ * @throws Si no hay ninguna API key utilizable para el proveedor pedido.
+ */
+function buildAttempts(provider: AiProvider): Attempt[] {
+  if (provider === 'gemini') {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) throw new Error('GEMINI_API_KEY no configurada');
+    return [{ provider: 'gemini', key }];
+  }
+  const attempts: Attempt[] = [];
+  const groqKeys = [process.env.GROQ_API_KEY, process.env.GROQ_API_KEY_2].filter(
+    (k): k is string => Boolean(k)
+  );
+  for (const key of groqKeys) attempts.push({ provider: 'groq', key });
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) attempts.push({ provider: 'gemini', key: geminiKey });
+  if (attempts.length === 0) throw new Error('GROQ_API_KEY no configurada');
+  return attempts;
 }
 
 /** Parte de contenido multimodal (texto o imagen) — formato OpenAI-compatible. */
@@ -43,6 +95,8 @@ function contentToText(content: string | ContentPart[] | null | undefined): stri
   return '';
 }
 
+/** Mensaje en el formato del wire OpenAI (incluye los roles `assistant`/`tool`
+ *  internos del bucle de tool-calling, que no expone el llamador). */
 interface AgentMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string | ContentPart[] | null;
@@ -55,6 +109,7 @@ interface AgentMessage {
   name?: string;
 }
 
+/** Opciones de entrada de {@link runAgent}. */
 export interface RunAgentOptions {
   system: string;
   /** Cada mensaje puede llevar imágenes (URLs públicas o data URLs base64). */
@@ -68,6 +123,7 @@ export interface RunAgentOptions {
   provider?: AiProvider;
 }
 
+/** Resultado de {@link runAgent}: el texto final + métricas de la ejecución. */
 export interface AgentResult {
   content: string;
   toolCalls: number;
@@ -76,7 +132,43 @@ export interface AgentResult {
   model: string;
 }
 
+/**
+ * Ejecuta el agente: arma la conversación, llama al LLM y resuelve el bucle de
+ * tool-calling hasta obtener una respuesta final o agotar `maxToolHops`.
+ *
+ * Detalles de robustez:
+ * - En la última iteración (`isFinal`) se desactivan las tools y se fuerza el
+ *   `response_format` JSON si se pidió, para garantizar una respuesta cerrada.
+ * - Si Groq falla con `tool_use_failed` (HTTP 400), reintenta una vez SIN tools.
+ * - Los resultados de cada tool se truncan a 8000 chars para no inflar el contexto.
+ *
+ * @param opts Ver {@link RunAgentOptions}.
+ * @returns Contenido final (texto, ya normalizado a string) y métricas.
+ * @throws Si el proveedor devuelve un error no recuperable o se agotan los hops.
+ */
 export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
+  const attempts = buildAttempts(opts.provider ?? 'groq');
+  let lastErr: unknown;
+  for (let i = 0; i < attempts.length; i++) {
+    const { provider, key } = attempts[i];
+    try {
+      return await runAgentOnce({ ...opts, provider }, key);
+    } catch (e) {
+      lastErr = e;
+      // Failover por cuota (429): pasamos al siguiente intento (otra key de
+      // Groq, o finalmente Gemini). Cualquier otro error se propaga de inmediato.
+      if (e instanceof RateLimitError && i < attempts.length - 1) continue;
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Ejecuta el agente contra un proveedor + key concretos (sin failover).
+ * {@link runAgent} la envuelve para recorrer la cadena de intentos ante un 429.
+ */
+async function runAgentOnce(opts: RunAgentOptions, apiKey: string): Promise<AgentResult> {
   const {
     system,
     messages,
@@ -88,7 +180,7 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
     provider = 'groq',
   } = opts;
 
-  const cfg = providerConfig(provider);
+  const cfg = providerConfig(provider, apiKey);
 
   const conversation: AgentMessage[] = [
     { role: 'system', content: system },
@@ -136,6 +228,8 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
 
     if (!res.ok) {
       const errText = await res.text();
+      // Cuota agotada → lo propagamos para que runAgent reintente en otro proveedor.
+      if (res.status === 429) throw new RateLimitError(provider, errText);
       const canRetryWithoutTools =
         provider === 'groq' &&
         tools &&
@@ -172,8 +266,10 @@ export async function runAgent(opts: RunAgentOptions): Promise<AgentResult> {
       });
 
       if (!fallbackRes.ok) {
+        const fbText = await fallbackRes.text();
+        if (fallbackRes.status === 429) throw new RateLimitError(provider, fbText);
         throw new Error(
-          `${provider} ${res.status}: ${errText}\nFallback sin herramientas: ${fallbackRes.status}: ${await fallbackRes.text()}`
+          `${provider} ${res.status}: ${errText}\nFallback sin herramientas: ${fallbackRes.status}: ${fbText}`
         );
       }
       const fallbackData = await fallbackRes.json();
