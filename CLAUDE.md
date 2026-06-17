@@ -85,3 +85,23 @@ src/lib/
 - Commits van directo a `main` (es el flujo del repo: `github.com/marzo245/ordenandome`). Push a `main` dispara deploy en Render.
 - Subida de imágenes: `POST /api/notes/upload-image` (imgbb con fallback a catbox), devuelve `{ url }`.
 - Markdown se renderiza con `react-markdown` + `remark-gfm` con un set compartido de componentes (ver `MD_COMPONENTS` en los managers/chats).
+
+## Buenas prácticas (aplícalas SIEMPRE, sin que lo pidan)
+
+En cada cambio, además de cumplir lo que se pide, deja el código y la UI mejor de como estaban. No hace falta avisar para esto:
+
+**Código**
+- **Reusar antes que duplicar:** si un patrón ya existe (p. ej. `MarkdownImageTextarea`, `MD_COMPONENTS`, `runAgent`), úsalo o extráelo a un componente/util compartido en vez de copiar.
+- **Tipado estricto:** nada de `any` injustificado; tipa props y retornos.
+- **Maneja los estados:** carga, error, vacío y deshabilitado. Nunca dejes una promesa sin `catch` ni una UI sin feedback.
+- **No dejes UI muerta:** todo control visible debe hacer algo (sin botones/inputs decorativos sin handler).
+- **Antes de pushear:** `npx next lint` **siempre** (los errores rompen el deploy en Render); si tocaste tipos, `npx tsc --noEmit`.
+
+**Diseño / UI**
+- **Usa los tokens del tema** (`var(--bg)`, `--text`, `--accent`, `--border`, `--muted`, `--surface`, `--danger`), nunca colores fijos.
+- **Jerarquía y consistencia:** mismos espaciados, tamaños y componentes que el resto de la sección; el estado activo y la acción primaria deben distinguirse (usa `--accent`).
+- **Accesibilidad:** foco visible (`focus:` ring/border), `aria-label`/`<label>` en controles, contraste suficiente (ojo con `--muted` en texto pequeño), targets táctiles cómodos.
+- **Responsive** y respeta el layout del shell (`max-w`, paddings existentes).
+- **Microcopy en español**, claro y breve.
+
+Si una mejora es grande o cambia comportamiento, menciónala/propónla; las pequeñas (lint, tipos, estados, accesibilidad, tokens) aplícalas directo.
