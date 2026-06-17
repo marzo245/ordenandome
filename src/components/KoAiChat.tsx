@@ -8,7 +8,23 @@ import type { KoEntry } from '@/db';
 import GuitoWalker from './GuitoWalker';
 import type { KoAiResult, KoBulkEdit, KoDraft } from '@/lib/ko-ai';
 
-type ChatMessage = { role: 'user' | 'assistant'; content: string };
+type ChatMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  images?: string[]; // data URLs base64 de capturas adjuntas
+};
+
+const MAX_IMAGES = 4;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB por imagen
+
+function readFileAsDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error ?? new Error('No se pudo leer la imagen'));
+    reader.readAsDataURL(file);
+  });
+}
 
 /* ------------------------------------------------------------------ */
 /* Markdown rendering (mismo patrón que KoManager / DailySummary)      */
@@ -47,8 +63,13 @@ function AssistantMarkdown({ value }: { value: string }) {
 }
 
 const PLACEHOLDER =
-  'Pregunta por los KO existentes, pide categorizar varios a la vez, o pega un error nuevo para crearlo.';
+  'Pregunta por los KO existentes, pide categorizar varios a la vez, pega un error nuevo para crearlo, o adjunta una captura del error como contexto.';
 
+/**
+ * Modal del asistente de IA de KO (GUITO en `/ko`). Conversa con `/api/ko/ai`,
+ * renderiza las propuestas (crear/editar/edición masiva) y, al confirmar, hace
+ * el POST/PATCH real resolviendo las entidades por nombre/código.
+ */
 export default function KoAiChat({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
   const [entries, setEntries] = useState<KoEntry[]>([]);
@@ -59,8 +80,10 @@ export default function KoAiChat({ open, onClose }: { open: boolean; onClose: ()
   const [proposal, setProposal] = useState<KoAiResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   // Al cerrar NO borramos la conversación: solo se limpia tras aplicar con
   // éxito o con el botón "nueva conversación".
@@ -70,6 +93,45 @@ export default function KoAiChat({ open, onClose }: { open: boolean; onClose: ()
     setError(null);
     setProposal(null);
     setBulkStatus(null);
+    setAttachments([]);
+  }
+
+  async function addFiles(files: FileList | File[]) {
+    const list = Array.from(files).filter((f) => f.type.startsWith('image/'));
+    if (list.length === 0) return;
+    setError(null);
+    for (const file of list) {
+      if (attachments.length >= MAX_IMAGES) {
+        setError(`Máximo ${MAX_IMAGES} imágenes por mensaje.`);
+        break;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        setError(`"${file.name || 'imagen'}" supera 5MB.`);
+        continue;
+      }
+      try {
+        const dataUrl = await readFileAsDataURL(file);
+        setAttachments((prev) =>
+          prev.length >= MAX_IMAGES ? prev : [...prev, dataUrl],
+        );
+      } catch {
+        setError('No se pudo leer la imagen.');
+      }
+    }
+  }
+
+  function removeAttachment(i: number) {
+    setAttachments((prev) => prev.filter((_, j) => j !== i));
+  }
+
+  function onPaste(e: React.ClipboardEvent) {
+    const imgs = Array.from(e.clipboardData.files).filter((f) =>
+      f.type.startsWith('image/'),
+    );
+    if (imgs.length > 0) {
+      e.preventDefault();
+      void addFiles(imgs);
+    }
   }
 
   useEffect(() => {
@@ -105,11 +167,17 @@ export default function KoAiChat({ open, onClose }: { open: boolean; onClose: ()
 
   async function send() {
     const text = input.trim();
-    if (!text || loading) return;
+    if ((!text && attachments.length === 0) || loading) return;
 
-    const nextMessages: ChatMessage[] = [...messages, { role: 'user', content: text }];
+    const userMsg: ChatMessage = {
+      role: 'user',
+      content: text || (attachments.length ? '(captura adjunta)' : ''),
+      ...(attachments.length ? { images: attachments } : {}),
+    };
+    const nextMessages: ChatMessage[] = [...messages, userMsg];
     setMessages(nextMessages);
     setInput('');
+    setAttachments([]);
     setLoading(true);
     setError(null);
     setProposal(null);
@@ -279,7 +347,7 @@ export default function KoAiChat({ open, onClose }: { open: boolean; onClose: ()
         </header>
 
         {/* GUITO camina mientras escribes o la IA piensa */}
-        <GuitoWalker walking={input.trim().length > 0 || loading} />
+        <GuitoWalker walking={input.trim().length > 0 || attachments.length > 0 || loading} />
 
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.length === 0 && (
@@ -297,7 +365,22 @@ export default function KoAiChat({ open, onClose }: { open: boolean; onClose: ()
                 {m.role === 'assistant' ? (
                   <AssistantMarkdown value={m.content} />
                 ) : (
-                  m.content
+                  <>
+                    {m.images && m.images.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-1.5">
+                        {m.images.map((src, j) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={j}
+                            src={src}
+                            alt={`captura ${j + 1}`}
+                            className="max-h-32 rounded border border-white/30 object-contain"
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {m.content}
+                  </>
                 )}
               </div>
             </div>
@@ -431,18 +514,64 @@ export default function KoAiChat({ open, onClose }: { open: boolean; onClose: ()
         )}
 
         <div className="border-t border-[var(--border)] p-3">
+          {/* Miniaturas de capturas adjuntas pendientes de enviar */}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {attachments.map((src, i) => (
+                <div key={i} className="relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt={`adjunto ${i + 1}`}
+                    className="h-16 w-16 object-cover rounded border border-[var(--border)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(i)}
+                    className="absolute -top-1.5 -right-1.5 bg-[var(--bg)] border border-[var(--border)] rounded-full w-5 h-5 text-xs leading-none text-[var(--muted)] hover:text-[var(--danger)]"
+                    title="Quitar imagen"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files) void addFiles(e.target.files);
+              e.target.value = '';
+            }}
+          />
+
           <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={loading || attachments.length >= MAX_IMAGES}
+              title="Adjuntar captura (o pega con Ctrl/⌘+V)"
+              className="self-stretch px-3 rounded border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
+            >
+              📎
+            </button>
             <textarea
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={onPaste}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
                   send();
                 }
               }}
-              placeholder="Describe o pega el error… (⌘/Ctrl+Enter)"
+              placeholder="Describe, pega el error o adjunta una captura… (⌘/Ctrl+Enter)"
               disabled={loading}
               rows={3}
               className="flex-1 bg-[var(--surface)] border border-[var(--border)] rounded px-3 py-2 outline-none focus:border-[var(--accent)] disabled:opacity-50 resize-y text-sm"
@@ -450,7 +579,7 @@ export default function KoAiChat({ open, onClose }: { open: boolean; onClose: ()
             />
             <button
               onClick={send}
-              disabled={loading || !input.trim()}
+              disabled={loading || (!input.trim() && attachments.length === 0)}
               className="bg-[var(--accent)] text-white rounded px-4 hover:opacity-90 disabled:opacity-50 self-stretch"
             >
               Enviar

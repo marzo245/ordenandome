@@ -1,6 +1,19 @@
+/**
+ * Asistente de IA de la base de conocimiento KO (errores conocidos del flujo
+ * de creación de cuentas de Enel).
+ *
+ * {@link koAssistant} recibe la conversación + el catálogo de KOs y devuelve un
+ * {@link KoAiResult} (JSON con `action`): responder una pregunta, proponer
+ * crear un KO, proponer editar uno, o una edición masiva. La IA referencia los
+ * KOs por código/error (o id en bulk); el cliente resuelve y confirma el cambio.
+ *
+ * El grueso de este archivo son helpers de saneamiento: normalizan lo que
+ * devuelve el LLM y degradan a `clarify` en vez de romper.
+ */
 import type { KoEntry } from '@/db';
 import { runAgent } from './ai-agent';
 
+/** Forma completa de un KO tal como lo propone la IA (campos = columnas de `ko_entries`). */
 export interface KoDraft {
   codigo: string | null;
   error: string;
@@ -16,12 +29,14 @@ export interface KoDraft {
   documentacion: string | null;
 }
 
+/** Una edición dentro de una propuesta masiva: a qué KO (por id) y qué cambia. */
 export interface KoBulkEdit {
   id: string;                 // id EXACTO del KO en el catálogo
   codigo: string | null;     // referencia legible (puede ser null)
   patch: Partial<KoDraft>;   // solo los campos que cambian
 }
 
+/** Salida del asistente KO: aclarar, responder, o proponer crear/editar (uno o varios). */
 export type KoAiResult =
   | { action: 'clarify'; message: string }
   | { action: 'answer'; message: string }
@@ -111,6 +126,7 @@ Ejemplos (uno por cada action):
 
 Si el usuario dice "sí"/"confirma" a un borrador previo, repite el último propose tal cual.`;
 
+/** Resume el catálogo de KOs en líneas compactas (con id) para el system prompt. */
 function summarizeCatalog(entries: KoEntry[]): string {
   if (entries.length === 0) return '(catálogo vacío — aún no hay KOs)';
   return entries
@@ -131,6 +147,7 @@ function summarizeCatalog(entries: KoEntry[]): string {
     .join('\n');
 }
 
+/** Completa un draft parcial del LLM a un {@link KoDraft} con todos los campos y tipos correctos. */
 function normalizeDraft(raw: Partial<KoDraft> | undefined): KoDraft {
   const d = raw ?? {};
   return {
@@ -187,6 +204,7 @@ function normalizePatch(raw: unknown): Partial<KoDraft> {
   return out;
 }
 
+/** Heurística: ¿el último mensaje del usuario parece una pregunta? (para preferir `answer`). */
 function looksLikeQuestion(messages: { role: string; content: string }[]): boolean {
   const last = [...messages].reverse().find((m) => m.role === 'user');
   if (!last) return false;
@@ -195,16 +213,25 @@ function looksLikeQuestion(messages: { role: string; content: string }[]): boole
   return /\b(cu[aá]nt|qu[eé]|cu[aá]l|c[oó]mo|d[oó]nde|qui[eé]n|mu[eé]stra|lista|enumera|hay)\b/.test(t);
 }
 
+/**
+ * Punto de entrada del asistente KO.
+ * @param messages Conversación con el usuario.
+ * @param entries Catálogo actual de KOs (contexto para el LLM).
+ * @returns Un {@link KoAiResult} ya parseado y saneado (degrada a `clarify` si algo falla).
+ */
 export async function koAssistant(
-  messages: { role: 'user' | 'assistant'; content: string }[],
+  messages: { role: 'user' | 'assistant'; content: string; images?: string[] }[],
   entries: KoEntry[]
 ): Promise<KoAiResult> {
+  // Si hay capturas adjuntas, usamos Gemini (multimodal); Groq llama-3.3 es solo texto.
+  const hasImages = messages.some((m) => m.images && m.images.length > 0);
   const result = await runAgent({
     system: SYSTEM(summarizeCatalog(entries)),
     messages,
     temperature: 0.3,
     responseFormat: 'json_object',
     tools: false,
+    provider: hasImages ? 'gemini' : 'groq',
   });
 
   // Tolera fences de código (```json ... ```) y texto alrededor.

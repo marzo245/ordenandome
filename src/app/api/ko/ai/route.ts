@@ -1,3 +1,8 @@
+/**
+ * Endpoint del asistente de IA de KO.
+ * - POST /api/ko/ai → recibe `{ messages }` (chat, con imágenes opcionales),
+ *   carga el catálogo de KOs como contexto y devuelve un `KoAiResult`.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, ko_entries } from '@/db';
 import { asc } from 'drizzle-orm';
@@ -8,7 +13,7 @@ export const maxDuration = 60;
 export async function POST(req: NextRequest) {
   try {
     const { messages } = (await req.json()) as {
-      messages: { role: 'user' | 'assistant'; content: string }[];
+      messages: { role: 'user' | 'assistant'; content: string; images?: string[] }[];
     };
 
     if (!Array.isArray(messages) || messages.length === 0) {

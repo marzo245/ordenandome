@@ -16,6 +16,10 @@
 [![NextAuth](https://img.shields.io/badge/NextAuth_v5-000000?style=for-the-badge&logo=auth0&logoColor=white)](https://authjs.dev/)
 [![Render](https://img.shields.io/badge/Render-46E3B7?style=for-the-badge&logo=render&logoColor=black)](https://render.com/)
 
+<br />
+
+[**✨ Funcionalidades**](#-funcionalidades) · [**🧠 IA**](#-arquitectura-de-ia) · [**🚀 Setup**](#-setup-local) · [**☁️ Despliegue**](#️-despliegue-render) · [**🔌 API**](#-endpoints-principales) · [**📖 CLAUDE.md**](./CLAUDE.md)
+
 </div>
 
 ---
@@ -25,6 +29,7 @@
 - [✨ Funcionalidades](#-funcionalidades)
 - [🧠 Arquitectura de IA](#-arquitectura-de-ia)
 - [🛠️ Stack](#️-stack)
+- [🗂️ Estructura](#️-estructura)
 - [🚀 Setup local](#-setup-local)
 - [⚙️ Comandos](#️-comandos)
 - [☁️ Despliegue (Render)](#️-despliegue-render)
@@ -78,6 +83,27 @@ Toda llamada al LLM pasa por un único núcleo: **`runAgent()`** (`src/lib/ai-ag
 - IA dual **Groq + Gemini** (ver [arriba](#-arquitectura-de-ia)).
 - **Octokit** para GitHub · **Obsidian** vía repo de GitHub · **Mermaid** y **react-markdown** para render.
 - **Render** — deploy (auto-deploy en push a `main`). Cron del resumen en cron-job.org.
+
+---
+
+## 🗂️ Estructura
+
+```
+src/
+├─ app/
+│  ├─ page.tsx              # "Hoy" — tablero de tareas
+│  ├─ notes/ noticias/ …    # una página por sección dentro del shell
+│  └─ api/                  # ai · auth · github · ko · news · notes · sistemas · summary · tasks
+├─ components/
+│  ├─ DashboardShell.tsx    # layout global: Topbar + Sidebar + GUITO contextual
+│  ├─ KoManager · SistemasManager · TaskBoard …    # gestores por sección
+│  └─ KoAiChat · SistemasAiChat · TaskPlannerModal # asistentes (modales, multimodales)
+├─ lib/
+│  ├─ ai-agent.ts           # runAgent(): núcleo dual-provider + failover + tool-calling
+│  ├─ ai-tools.ts           # definiciones + executors de tools
+│  └─ ko-ai · sistemas-ai · notes-ai …             # asistentes por dominio (devuelven action JSON)
+└─ db/                      # schema Drizzle + cliente Neon
+```
 
 ---
 
