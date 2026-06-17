@@ -1,3 +1,7 @@
+/**
+ * Sincroniza una tarea con Google Calendar bajo demanda.
+ * - POST /api/tasks/[id]/calendar → crea el evento de la tarea (404 si no existe).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tasks } from '@/db';
 import { eq } from 'drizzle-orm';

@@ -1,3 +1,9 @@
+/**
+ * API REST de un KO concreto (`/api/ko/[id]`).
+ * - GET    → devuelve el KO (404 si no existe).
+ * - PATCH  → actualiza campos (ignora id/timestamps; refresca `updated_at`).
+ * - DELETE → borra el KO.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, ko_entries } from '@/db';
 import { eq } from 'drizzle-orm';

@@ -15,6 +15,7 @@ function formatDate(value: string | null): string | null {
   return formatter.format(new Date(value + 'T00:00:00'));
 }
 
+/** Campo de propiedad para un rango de fechas (due_date / deadline) de una tarea. */
 export default function DateRangeField({ start, end, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);

@@ -1,11 +1,19 @@
+/**
+ * API REST de una tarea concreta (`/api/tasks/[id]`).
+ * - PATCH  → actualiza la tarea; propaga estado entre padre/subtareas
+ *   (el estado del padre = mínimo de sus hijos) y sincroniza Google Calendar.
+ * - DELETE → borra la tarea (y limpia su evento de calendario si existe).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tasks, type Task } from '@/db';
 import { and, eq, ne } from 'drizzle-orm';
 import { deleteCalendarEvent } from '@/lib/google-calendar';
 
 type TaskStatus = 'todo' | 'doing' | 'done';
+/** Orden de los estados para poder calcular el "mínimo" de un conjunto. */
 const STATUS_RANK: Record<TaskStatus, number> = { todo: 0, doing: 1, done: 2 };
 
+/** Devuelve el estado menos avanzado de la lista (todo < doing < done). */
 function minStatus(statuses: TaskStatus[]): TaskStatus {
   return statuses.reduce<TaskStatus>(
     (acc, s) => (STATUS_RANK[s] < STATUS_RANK[acc] ? s : acc),

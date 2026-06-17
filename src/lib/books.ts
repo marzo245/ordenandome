@@ -1,5 +1,14 @@
+/**
+ * Recomendaciones de libros desde Open Library.
+ *
+ * Por cada nicho (dev, ia, seguridad, startups) consulta el endpoint de
+ * "subjects" de Open Library, normaliza a {@link BookSuggestion}, dedup por id
+ * y reporta conteos/errores por nicho. Tolerante a fallos: un nicho que falla
+ * no tumba al resto.
+ */
 export type NicheKey = 'dev' | 'ai' | 'sec' | 'startup';
 
+/** Un libro sugerido, normalizado desde Open Library. */
 export interface BookSuggestion {
   id: string;
   title: string;
@@ -11,6 +20,7 @@ export interface BookSuggestion {
   first_publish_year: number | null;
 }
 
+/** Etiqueta legible de cada nicho (para la UI). */
 export const NICHE_LABELS: Record<NicheKey, string> = {
   dev: 'Dev / Web',
   ai: 'IA / LLM',
@@ -18,6 +28,7 @@ export const NICHE_LABELS: Record<NicheKey, string> = {
   startup: 'Startups',
 };
 
+/** Mapea cada nicho al "subject" de Open Library que se consulta. */
 const NICHE_SUBJECTS: Record<NicheKey, string> = {
   dev: 'computer_programming',
   ai: 'artificial_intelligence',
@@ -33,6 +44,7 @@ interface OlWork {
   first_publish_year?: number;
 }
 
+/** fetch con timeout de 6s y sin cache; devuelve null en vez de lanzar si falla/aborta. */
 async function safeFetch(url: string): Promise<Response | null> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 6000);
@@ -51,6 +63,7 @@ async function safeFetch(url: string): Promise<Response | null> {
   }
 }
 
+/** Trae hasta `limit` libros del subject de un nicho, ya normalizados. */
 async function fetchSubject(niche: NicheKey, limit: number): Promise<BookSuggestion[]> {
   const subject = NICHE_SUBJECTS[niche];
   const url = `https://openlibrary.org/subjects/${subject}.json?limit=${limit}`;
@@ -71,12 +84,17 @@ async function fetchSubject(niche: NicheKey, limit: number): Promise<BookSuggest
   }));
 }
 
+/** Resultado agregado: libros dedup + conteo por nicho + errores por nicho. */
 export interface BookRecommendationsResult {
   items: BookSuggestion[];
   perNiche: Record<NicheKey, number>;
   errors: { niche: NicheKey; error: string }[];
 }
 
+/**
+ * Trae recomendaciones de los cuatro nichos en paralelo y las combina.
+ * @param perNiche Cuántos libros pedir por nicho (default 6).
+ */
 export async function fetchBookRecommendations(
   perNiche = 6
 ): Promise<BookRecommendationsResult> {

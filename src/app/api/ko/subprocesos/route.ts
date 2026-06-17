@@ -1,3 +1,8 @@
+/**
+ * API REST de subprocesos KO (colección).
+ * - GET  /api/ko/subprocesos → lista todos los subprocesos.
+ * - POST /api/ko/subprocesos → crea un subproceso.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, ko_subprocesos } from '@/db';
 import { asc } from 'drizzle-orm';

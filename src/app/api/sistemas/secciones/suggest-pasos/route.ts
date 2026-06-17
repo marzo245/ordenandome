@@ -1,3 +1,8 @@
+/**
+ * Endpoint que sugiere con IA los pasos del flujo multi-sistema de una acción.
+ * - POST /api/sistemas/secciones/suggest-pasos → recibe título/contenido/descripción
+ *   y devuelve `{ pasos, contenido }` propuestos (ver `suggestAccionPasos`).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, sistemas } from '@/db';
 import { asc } from 'drizzle-orm';

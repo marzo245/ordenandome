@@ -1,3 +1,9 @@
+/**
+ * Chat de IA asociado a una tarea (`/api/tasks/[id]/chat`).
+ * - GET  → historial de mensajes de la tarea.
+ * - POST → guarda el mensaje del usuario, llama al LLM con el contexto de la
+ *   tarea y persiste + devuelve la respuesta del asistente.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tasks, task_messages } from '@/db';
 import { asc, eq } from 'drizzle-orm';

@@ -1,3 +1,8 @@
+/**
+ * API REST del catálogo de KOs (colección).
+ * - GET  /api/ko → lista todos los KOs ordenados por código.
+ * - POST /api/ko → crea un KO (requiere `error`; `codigo` opcional).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, ko_entries } from '@/db';
 import { asc } from 'drizzle-orm';

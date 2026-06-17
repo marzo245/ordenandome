@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 
+/** Renderiza un diagrama Mermaid a partir de su código fuente (usado dentro del Markdown). */
 export default function MermaidBlock({ code }: { code: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const baseId = useId();

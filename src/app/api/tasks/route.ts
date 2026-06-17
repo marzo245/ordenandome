@@ -1,3 +1,8 @@
+/**
+ * API REST de tareas (colección).
+ * - GET  /api/tasks → lista tareas.
+ * - POST /api/tasks → crea una tarea (e intenta sincronizarla a Google Calendar).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tasks } from '@/db';
 import { desc, eq, sql } from 'drizzle-orm';

@@ -1,3 +1,9 @@
+/**
+ * Feed de noticias técnicas por nicho.
+ * - GET /api/news       → `{ items }` ordenados.
+ * - GET /api/news?debug → además conteo por fuente y errores.
+ *   `force-dynamic`: nunca se cachea. Accesible también vía CRON_SECRET (ver middleware).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchNewsWithDebug } from '@/lib/news';
 

@@ -28,6 +28,7 @@ function Pill({ type }: { type: TaskType }) {
   );
 }
 
+/** Selector tipo "pill" del tipo de una tarea (trabajo/personal/estudio/otro). */
 export default function TypePill({ value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);

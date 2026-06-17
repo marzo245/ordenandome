@@ -1,3 +1,10 @@
+/**
+ * Tipos de dominio del lado del cliente (forma serializada de las filas).
+ *
+ * Espejan las tablas de `src/db/schema.ts` pero con fechas como `string`
+ * (tras pasar por JSON) y sin los helpers de Drizzle, para usarse en los
+ * componentes React y en las respuestas de las rutas API.
+ */
 export type TaskStatus = 'todo' | 'doing' | 'done';
 export type TaskPriority = 'baja' | 'media' | 'alta';
 export type TaskType = 'trabajo' | 'personal' | 'estudio' | 'otro';

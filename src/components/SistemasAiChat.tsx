@@ -70,6 +70,11 @@ function AssistantMarkdown({ value }: { value: string }) {
 const PLACEHOLDER =
   'Pregunta por los sistemas (OPERA, eCO, Salesforce, ForceBeat, Beats, SAP), documenta uno nuevo, crea acciones, o pide editar una acción existente (p. ej. «agrega a «Crear cuenta» un paso en SAP»).';
 
+/**
+ * Modal del asistente de IA de Sistemas (GUITO en `/sistemas`). Chat multimodal
+ * (permite adjuntar capturas) contra `/api/sistemas/ai`; renderiza propuestas de
+ * crear/editar sistemas y acciones y las aplica al confirmar.
+ */
 export default function SistemasAiChat({
   open,
   onClose,

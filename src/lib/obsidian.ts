@@ -1,9 +1,21 @@
+/**
+ * Acceso al vault Obsidian, que vive como repo de GitHub.
+ *
+ * Cubre dos cosas: (1) E/S contra GitHub (listar, leer, escribir notas vía
+ * Octokit) y (2) el parseo de una nota Markdown a {@link ParsedNote} —
+ * frontmatter, scope inferido, tags, wikilinks y las tareas embebidas
+ * (`- [ ] ...` con emojis de fecha/prioridad estilo Obsidian Tasks).
+ *
+ * Las tareas extraídas llevan un `fingerprint` estable para deduplicar entre
+ * sincronizaciones sucesivas.
+ */
 import { Octokit } from 'octokit';
 import matter from 'gray-matter';
 import { createHash } from 'node:crypto';
 
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 
+/** Resuelve owner/repo/branch del vault desde el entorno. @throws si falta o mal formado. */
 function repo() {
   const full = process.env.OBSIDIAN_VAULT_REPO;
   if (!full) throw new Error('OBSIDIAN_VAULT_REPO no configurado');
@@ -12,12 +24,14 @@ function repo() {
   return { owner, name, branch: process.env.OBSIDIAN_VAULT_BRANCH || 'main' };
 }
 
+/** Entrada del árbol git del vault: ruta + SHA del blob + tamaño. */
 export interface VaultFile {
   path: string;
   sha: string;
   size: number;
 }
 
+/** Una nota ya parseada: metadatos + cuerpo derivado (excerpt, enlaces, tareas). */
 export interface ParsedNote {
   path: string;
   title: string;
@@ -31,6 +45,7 @@ export interface ParsedNote {
   raw: string;
 }
 
+/** Una tarea embebida en una nota (checkbox Markdown con metadatos Obsidian Tasks). */
 export interface ParsedTask {
   text: string;
   done: boolean;
@@ -100,6 +115,7 @@ export async function writeNote(
 
 const WIKILINK_RE = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g;
 
+/** Extrae los destinos de wikilinks `[[Nota]]` (ignora alias y anclas), sin duplicados. */
 function extractWikilinks(body: string): string[] {
   const out = new Set<string>();
   for (const m of body.matchAll(WIKILINK_RE)) {
@@ -109,6 +125,7 @@ function extractWikilinks(body: string): string[] {
   return [...out];
 }
 
+/** Decide el scope de la nota: respeta el frontmatter `scope` y, si no, lo infiere del path. */
 function inferScope(path: string, fmScope: unknown): ParsedNote['scope'] {
   if (typeof fmScope === 'string') {
     const s = fmScope.toLowerCase();
@@ -126,6 +143,7 @@ function inferScope(path: string, fmScope: unknown): ParsedNote['scope'] {
   return 'unknown';
 }
 
+/** Normaliza los tags del frontmatter (array o string separado por comas/espacios) a `string[]`. */
 function normalizeTags(fmTags: unknown): string[] {
   if (Array.isArray(fmTags)) return fmTags.map(String);
   if (typeof fmTags === 'string') return fmTags.split(/[,\s]+/).filter(Boolean);
@@ -137,12 +155,14 @@ const DUE_RE = /📅\s*(\d{4}-\d{2}-\d{2})/;
 const DEADLINE_RE = /⏳\s*(\d{4}-\d{2}-\d{2})/;
 const TAG_RE = /(?:^|\s)#([A-Za-z0-9_-][\w/-]*)/g;
 
+/** Deriva la prioridad de una tarea según los emojis de prioridad de Obsidian Tasks. */
 function priorityFromMarks(text: string): 'baja' | 'media' | 'alta' {
   if (/⏫|🔼|🔴/.test(text)) return 'alta';
   if (/🔽|⬇️|🟢/.test(text)) return 'baja';
   return 'media';
 }
 
+/** Limpia el texto de una tarea quitando fechas, emojis de prioridad y tags. */
 function normalizeText(text: string): string {
   return text
     .replace(DUE_RE, '')
@@ -152,10 +172,12 @@ function normalizeText(text: string): string {
     .trim();
 }
 
+/** SHA1 (16 chars) de path+línea+texto normalizado: identidad estable para dedupe entre syncs. */
 function fingerprintTask(path: string, line: number, text: string): string {
   return createHash('sha1').update(`${path}::${line}::${normalizeText(text)}`).digest('hex').slice(0, 16);
 }
 
+/** Recorre el cuerpo y extrae todas las tareas-checkbox con sus metadatos y línea. */
 export function extractTasks(path: string, body: string): ParsedTask[] {
   const out: ParsedTask[] = [];
   const lines = body.split('\n');
@@ -181,6 +203,7 @@ export function extractTasks(path: string, body: string): ParsedTask[] {
   return out;
 }
 
+/** Parsea el Markdown crudo de una nota a {@link ParsedNote} (frontmatter + cuerpo derivado). */
 export function parseNote(path: string, raw: string): ParsedNote {
   const parsed = matter(raw);
   const fm = (parsed.data ?? {}) as Record<string, unknown>;

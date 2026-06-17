@@ -20,6 +20,7 @@ function ymd(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+/** Campana de notificaciones: avisa de tareas que vencen hoy o están vencidas. */
 export default function NotificationsButton({ tasks }: { tasks: Task[] }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);

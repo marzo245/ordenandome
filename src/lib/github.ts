@@ -1,8 +1,16 @@
+/**
+ * Cliente de actividad de GitHub.
+ *
+ * Usa la Search API de GitHub para traer commits y PRs del usuario en una
+ * ventana de días, normalizados a {@link RawActivity} para cachear en DB y
+ * alimentar el feed y el resumen diario.
+ */
 import { Octokit } from 'octokit';
 
 const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
 const USER = process.env.GITHUB_USERNAME!;
 
+/** Actividad normalizada (un commit o un PR) lista para cachear. */
 export interface RawActivity {
   day: string;
   repo: string;

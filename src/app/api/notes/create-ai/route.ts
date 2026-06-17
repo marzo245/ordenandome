@@ -1,3 +1,8 @@
+/**
+ * Generación de una nota nueva con IA.
+ * - POST /api/notes/create-ai → recibe una descripción y devuelve la nota
+ *   propuesta (título, carpeta, scope, tags, contenido) — ver `aiCreateNote`.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { aiCreateNote } from '@/lib/notes-ai';
 import { buildVaultMap } from '@/lib/vault-context';

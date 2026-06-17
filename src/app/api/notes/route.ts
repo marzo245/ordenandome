@@ -1,3 +1,7 @@
+/**
+ * Listado/búsqueda de notas desde la cache (`notes_cache`).
+ * - GET /api/notes → lista notas con filtros opcionales (scope, carpeta, texto…).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, notes_cache } from '@/db';
 import { and, eq, ilike, sql, desc } from 'drizzle-orm';

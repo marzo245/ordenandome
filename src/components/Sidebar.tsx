@@ -193,6 +193,7 @@ function SidebarContent({
   );
 }
 
+/** Navegación de primer nivel (secciones) + tareas; drawer en móvil, fijo en escritorio. */
 export default function Sidebar({ open, onClose, tasks }: SidebarProps) {
   return (
     <>

@@ -1,3 +1,12 @@
+/**
+ * Middleware de autenticación (corre en el edge para todas las rutas).
+ *
+ * Es el guardia central de la app: deja pasar rutas públicas (`/login`,
+ * `/api/auth/*`), permite los endpoints de cron con el header
+ * `Authorization: Bearer CRON_SECRET` (acceso server-to-server) y redirige a
+ * `/login` cualquier otra petición sin sesión. Por eso las rutas API no
+ * vuelven a llamar a `auth()`: la protección vive aquí.
+ */
 import { auth } from '@/auth';
 import { NextResponse } from 'next/server';
 

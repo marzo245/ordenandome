@@ -1,3 +1,8 @@
+/**
+ * Edición asistida por IA del contenido de una nota.
+ * - POST /api/notes/ai → recibe contenido + modo (improve/expand/…); devuelve el
+ *   nuevo Markdown (ver `aiEditNote`).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { aiEditNote, type AiMode } from '@/lib/notes-ai';
 import { buildVaultMap } from '@/lib/vault-context';

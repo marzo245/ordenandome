@@ -27,6 +27,7 @@ function Pill({ status }: { status: TaskStatus }) {
   );
 }
 
+/** Selector tipo "pill" del estado de una tarea (todo/doing/done). */
 export default function StatusPill({ value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);

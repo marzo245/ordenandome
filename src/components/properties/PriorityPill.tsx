@@ -27,6 +27,7 @@ function Pill({ priority }: { priority: TaskPriority }) {
   );
 }
 
+/** Selector tipo "pill" de la prioridad de una tarea (baja/media/alta). */
 export default function PriorityPill({ value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);

@@ -22,6 +22,11 @@ function guitoContextFor(pathname: string | null): GuitoContext {
   return 'task';
 }
 
+/**
+ * Layout global de la app: Topbar + Sidebar + contenido + botones flotantes.
+ * Monta el GUITO contextual ({@link guitoContextFor}): en `/ko` abre el chat KO,
+ * en `/sistemas` el de Sistemas, y en el resto el planner de tareas.
+ */
 export default function DashboardShell({
   session,
   logoutSlot,

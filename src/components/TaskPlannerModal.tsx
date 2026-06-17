@@ -15,6 +15,10 @@ type Proposal =
   | { kind: 'single'; draft: TaskDraft }
   | { kind: 'multi'; parent: TaskDraft; subtasks: TaskDraft[] };
 
+/**
+ * Modal del planner de tareas (GUITO general). Conversa con `/api/ai/plan` y, al
+ * confirmar la propuesta, crea la tarea (o tarea padre + subtareas).
+ */
 export default function TaskPlannerModal({ open, onClose, onCreated }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(null);

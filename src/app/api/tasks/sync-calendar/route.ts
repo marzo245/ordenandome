@@ -1,3 +1,8 @@
+/**
+ * Sincronización masiva de tareas a Google Calendar.
+ * - POST /api/tasks/sync-calendar → crea eventos para las tareas con fecha, sin
+ *   evento aún y no completadas; guarda el `google_event_id` y reporta totales/errores.
+ */
 import { NextResponse } from 'next/server';
 import { db, tasks } from '@/db';
 import { and, eq, isNull, isNotNull, ne } from 'drizzle-orm';

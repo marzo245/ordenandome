@@ -1,6 +1,25 @@
+/**
+ * Schema Drizzle de la base de datos (Neon Postgres).
+ *
+ * Cada `pgTable` define una tabla y, debajo, se exporta su tipo inferido
+ * (`$inferSelect` para filas leídas, `$inferInsert` para inserciones).
+ *
+ * IMPORTANTE: este schema NO se aplica solo. Tras editarlo hay que sincronizar
+ * el DDL contra Neon (`npm run db:push` o el `ALTER/CREATE` manual). El DDL
+ * equivalente se mantiene a mano en `supabase/schema.sql`.
+ *
+ * Dominios:
+ * - tareas: `tasks`, `task_messages`
+ * - notas Obsidian: `notes_cache`, `note_links`
+ * - sistemas (doc operativa): `sistemas`, `sistema_secciones`
+ * - KO (errores conocidos): `ko_entries`, `ko_subprocesos`
+ * - varios: `github_activity`, `daily_summaries`, `reading_list`
+ */
 import { pgTable, uuid, text, date, timestamp, index, uniqueIndex, integer, jsonb } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
+/** Tareas del tablero "Hoy". Pueden originarse a mano o derivarse de una nota
+ *  (campos `source_*`) y sincronizarse a Google Calendar (`google_event_id`). */
 export const tasks = pgTable(
   'tasks',
   {
@@ -28,6 +47,7 @@ export const tasks = pgTable(
   ]
 );
 
+/** Actividad de GitHub (commits y PRs) sincronizada por día, para el feed y el resumen diario. */
 export const github_activity = pgTable(
   'github_activity',
   {
@@ -46,6 +66,7 @@ export const github_activity = pgTable(
   ]
 );
 
+/** Historial del chat de IA asociado a una tarea (se borra en cascada con la tarea). */
 export const task_messages = pgTable(
   'task_messages',
   {
@@ -60,6 +81,7 @@ export const task_messages = pgTable(
 
 export type TaskMessage = typeof task_messages.$inferSelect;
 
+/** Lista de lectura (libros): estado, nicho y metadatos de Open Library (`olid`). */
 export const reading_list = pgTable(
   'reading_list',
   {
@@ -81,6 +103,7 @@ export const reading_list = pgTable(
 export type ReadingItem = typeof reading_list.$inferSelect;
 export type NewReadingItem = typeof reading_list.$inferInsert;
 
+/** Resumen diario generado por IA (uno por día, clave `day` única). */
 export const daily_summaries = pgTable('daily_summaries', {
   id: uuid().primaryKey().default(sql`gen_random_uuid()`),
   day: date().notNull().unique(),
@@ -88,6 +111,9 @@ export const daily_summaries = pgTable('daily_summaries', {
   generated_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
 });
 
+/** Cache local de las notas del vault Obsidian (sincronizado desde GitHub).
+ *  Guarda metadatos + excerpt para búsqueda rápida; el cuerpo completo se baja
+ *  de GitHub bajo demanda. `sha` permite detectar cambios. */
 export const notes_cache = pgTable(
   'notes_cache',
   {
@@ -110,6 +136,7 @@ export const notes_cache = pgTable(
   ]
 );
 
+/** Grafo de enlaces entre notas (wikilinks `[[..]]` y embeds), para el panel de backlinks. */
 export const note_links = pgTable(
   'note_links',
   {

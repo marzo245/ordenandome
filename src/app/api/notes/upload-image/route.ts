@@ -1,7 +1,13 @@
+/**
+ * Subida de imágenes para los editores de Markdown.
+ * - POST /api/notes/upload-image → sube la imagen a imgbb (si hay `IMGBB_API_KEY`)
+ *   con fallback a catbox.moe; devuelve `{ url }`.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 
 export const maxDuration = 60;
 
+/** Sube el archivo a imgbb y devuelve la URL pública. @throws si imgbb falla. */
 async function uploadImgBB(file: File): Promise<string> {
   const key = process.env.IMGBB_API_KEY;
   if (!key) throw new Error('no-imgbb-key');

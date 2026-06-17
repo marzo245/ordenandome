@@ -37,6 +37,11 @@ const SCOPES: { value: Scope | 'all'; label: string }[] = [
   { value: 'unknown', label: 'sin clasificar' },
 ];
 
+/**
+ * Explorador del vault Obsidian. Árbol de carpetas + lectura/edición de notas
+ * (Markdown con wikilinks, embeds, callouts y Mermaid), edición asistida por IA
+ * y creación de notas. Habla con `/api/notes/*`.
+ */
 export default function NotesBrowser({ initial }: { initial: NoteRow[] }) {
   const [notes, setNotes] = useState<NoteRow[]>(initial);
   const [scope, setScope] = useState<Scope | 'all'>('all');

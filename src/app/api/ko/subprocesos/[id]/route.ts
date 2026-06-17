@@ -1,3 +1,9 @@
+/**
+ * API REST de un subproceso KO concreto (`/api/ko/subprocesos/[id]`).
+ * - GET    → devuelve el subproceso (404 si no existe).
+ * - PATCH  → actualiza campos (refresca `updated_at`).
+ * - DELETE → borra el subproceso.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, ko_subprocesos } from '@/db';
 import { eq } from 'drizzle-orm';

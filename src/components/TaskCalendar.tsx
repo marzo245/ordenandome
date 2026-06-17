@@ -61,6 +61,7 @@ interface Props {
   onMove: (task: Task, newDate: string) => Promise<void>;
 }
 
+/** Vista de calendario mensual de tareas; permite seleccionar y mover tareas entre días. */
 export default function TaskCalendar({ tasks, onSelect, onMove }: Props) {
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [activeTask, setActiveTask] = useState<Task | null>(null);

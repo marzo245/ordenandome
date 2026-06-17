@@ -1,11 +1,22 @@
+/**
+ * Configuración de NextAuth v5 (Google OAuth).
+ *
+ * App de un solo usuario: el callback `signIn` solo deja entrar a
+ * {@link ALLOWED_EMAIL}. Pide el scope de Google Calendar y guarda el
+ * access/refresh token en el JWT, refrescándolo automáticamente cuando expira
+ * ({@link refreshGoogleToken}) para poder llamar a la API de Calendar.
+ * El `accessToken` se expone en la sesión para usarlo en el servidor.
+ */
 import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
 
+/** Único email autorizado a iniciar sesión (app personal). */
 const ALLOWED_EMAIL = 'diegochicuazuque@gmail.com';
 
 const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 const SCOPES = ['openid', 'email', 'profile', CALENDAR_SCOPE].join(' ');
 
+/** Canjea el refresh token de Google por un nuevo access token. @throws si Google rechaza. */
 async function refreshGoogleToken(refreshToken: string) {
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',

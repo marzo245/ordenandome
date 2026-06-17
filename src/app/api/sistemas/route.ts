@@ -1,7 +1,13 @@
+/**
+ * API REST de sistemas (colección).
+ * - GET  /api/sistemas → lista todos los sistemas ordenados por `orden` y nombre.
+ * - POST /api/sistemas → crea un sistema (requiere `nombre`).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, sistemas } from '@/db';
 import { asc } from 'drizzle-orm';
 
+/** Lista todos los sistemas ordenados. */
 export async function GET() {
   try {
     const rows = await db
@@ -14,6 +20,7 @@ export async function GET() {
   }
 }
 
+/** Crea un sistema. Ignora id/timestamps del body; valida `nombre`. */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();

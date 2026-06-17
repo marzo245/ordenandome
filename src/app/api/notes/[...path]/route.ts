@@ -1,12 +1,20 @@
+/**
+ * Lectura/escritura de una nota concreta del vault (`/api/notes/[...path]`).
+ * El path es un catch-all (segmentos url-encoded de la ruta dentro del vault).
+ * - GET → contenido de la nota desde GitHub + backlinks.
+ * - PUT → guarda el contenido en GitHub y refresca la cache.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, notes_cache, note_links, tasks } from '@/db';
 import { eq, or } from 'drizzle-orm';
 import { getNoteContent, parseNote, writeNote } from '@/lib/obsidian';
 
+/** Contexto de ruta de Next: el path catch-all como array de segmentos. */
 interface Ctx {
   params: Promise<{ path: string[] }>;
 }
 
+/** Reconstruye el path del vault decodificando y uniendo los segmentos. */
 function decodePath(segments: string[]) {
   return segments.map(decodeURIComponent).join('/');
 }

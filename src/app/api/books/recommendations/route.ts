@@ -1,3 +1,8 @@
+/**
+ * Recomendaciones de libros por nicho (Open Library).
+ * - GET /api/books/recommendations → devuelve libros sugeridos + diagnóstico.
+ *   `force-dynamic`: nunca se cachea (consulta fuentes externas en vivo).
+ */
 import { NextResponse } from 'next/server';
 import { fetchBookRecommendations } from '@/lib/books';
 

@@ -1,3 +1,12 @@
+/**
+ * Agregador de noticias técnicas por nicho (dev, ia, seguridad, startups).
+ *
+ * Reúne items de varias fuentes (Hacker News, Dev.to, Reddit, Lobsters y feeds
+ * RSS/Atom de Krebs, The Hacker News y arXiv), los normaliza a
+ * {@link NewsItem}, deduplica por URL/id y ordena por una mezcla de
+ * popularidad y recencia. Cada fuente está aislada: si una falla, se registra
+ * en `errors` y el resto continúa.
+ */
 import { XMLParser } from 'fast-xml-parser';
 
 export type NicheKey = 'dev' | 'ai' | 'sec' | 'startup';
@@ -11,6 +20,7 @@ export type SourceKey =
   | 'thn'
   | 'arxiv';
 
+/** Una noticia normalizada, sea cual sea la fuente de origen. */
 export interface NewsItem {
   id: string;
   title: string;
@@ -71,6 +81,7 @@ const REDDIT_SUBS: Record<NicheKey, string> = {
 const PER_SOURCE = 4;
 const FETCH_TIMEOUT_MS = 6000;
 
+/** fetch con timeout y User-Agent fijo; devuelve null si falla/aborta (no lanza). */
 async function safeFetch(url: string, init?: RequestInit): Promise<Response | null> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
@@ -242,6 +253,7 @@ interface RssItem {
   guid?: string | { '#text': string };
 }
 
+/** Parsea un feed RSS o Atom (arXiv) y normaliza sus entradas a {@link NewsItem}. */
 async function fetchRss(
   feedUrl: string,
   source: SourceKey,
@@ -328,12 +340,14 @@ async function fetchArxiv(): Promise<NewsItem[]> {
 
 // ---------- orchestrator ----------
 
+/** Resultado con diagnóstico: items + conteo por fuente + errores por fuente. */
 export interface NewsDebug {
   items: NewsItem[];
   perSource: Partial<Record<SourceKey, number>>;
   errors: { source: SourceKey; error: string }[];
 }
 
+/** Ejecuta un fetcher aislando su fallo: si lanza, lo apunta en `errors` y devuelve []. */
 async function safeRun(
   source: SourceKey,
   fn: () => Promise<NewsItem[]>,
@@ -347,6 +361,10 @@ async function safeRun(
   }
 }
 
+/**
+ * Orquesta todas las fuentes en paralelo, deduplica y ordena.
+ * @returns Items finales + diagnóstico (conteo por fuente y errores).
+ */
 export async function fetchNewsWithDebug(): Promise<NewsDebug> {
   const errors: { source: SourceKey; error: string }[] = [];
   const niches: NicheKey[] = ['dev', 'ai', 'sec', 'startup'];
@@ -392,6 +410,7 @@ export async function fetchNewsWithDebug(): Promise<NewsDebug> {
   return { items: dedup, perSource, errors };
 }
 
+/** Atajo que devuelve solo los items (sin el diagnóstico). */
 export async function fetchNews(): Promise<NewsItem[]> {
   const result = await fetchNewsWithDebug();
   return result.items;

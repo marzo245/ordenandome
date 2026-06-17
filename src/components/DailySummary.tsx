@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import type { DailySummary as Summary } from '@/lib/types';
 import LottiePlayer from './LottiePlayer';
 
+/** Tarjeta del resumen diario generado por IA; muestra el del día y permite regenerarlo. */
 export default function DailySummary({ initial = null }: { initial?: Summary | null }) {
   const [summary, setSummary] = useState<Summary | null>(initial);
   const [loading, setLoading] = useState(false);

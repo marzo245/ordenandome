@@ -1,3 +1,9 @@
+/**
+ * API REST de un sistema concreto (`/api/sistemas/[id]`).
+ * - GET    → devuelve el sistema (404 si no existe).
+ * - PATCH  → actualiza campos (ignora id/timestamps; refresca `updated_at`).
+ * - DELETE → borra el sistema (las acciones caen en cascada por FK).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, sistemas } from '@/db';
 import { eq } from 'drizzle-orm';

@@ -1,3 +1,8 @@
+/**
+ * Endpoint del asistente de IA de Sistemas.
+ * - POST /api/sistemas/ai → recibe `{ messages }` (chat, con imágenes opcionales),
+ *   carga sistemas + acciones como contexto y devuelve un `SistemaAiResult`.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, sistemas, sistema_secciones } from '@/db';
 import { asc } from 'drizzle-orm';

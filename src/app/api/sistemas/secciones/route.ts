@@ -1,7 +1,13 @@
+/**
+ * API REST de acciones de sistema (`sistema_secciones`, colección).
+ * - GET  /api/sistemas/secciones?sistema_id= → lista acciones (opcionalmente filtradas por sistema).
+ * - POST /api/sistemas/secciones → crea una acción (requiere `sistema_id` y `titulo`).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, sistema_secciones } from '@/db';
 import { asc, eq } from 'drizzle-orm';
 
+/** Lista acciones; si llega `sistema_id` filtra por ese sistema. */
 export async function GET(req: NextRequest) {
   try {
     const sistemaId = req.nextUrl.searchParams.get('sistema_id');
@@ -22,6 +28,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/** Crea una acción. Ignora id/timestamps del body; valida `sistema_id` y `titulo`. */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();

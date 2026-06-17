@@ -1,8 +1,17 @@
+/**
+ * Generador del resumen diario por IA.
+ *
+ * A partir de las tareas del día, la actividad de GitHub y las noticias del
+ * nicho, produce un resumen breve en Markdown ("Qué hice hoy", "Pendiente",
+ * "Prioridad para mañana", "Para leer hoy"). Inyecta el mapa del vault como
+ * grounding y permite tools solo si ese mapa existe.
+ */
 import type { Task, GithubActivityRow as GitHubActivity } from '@/db';
 import type { NewsItem } from './news';
 import { runAgent } from './ai-agent';
 import { buildVaultMap } from './vault-context';
 
+/** Datos del día que alimentan el resumen. */
 interface SummaryInput {
   day: string;
   tasksDue: Task[];
@@ -40,6 +49,10 @@ REGLAS DE FORMATO
 - Usa **negrita** solo para destacar términos clave (1-2 por sección).
 - Máximo ~200 palabras totales. Sin relleno, sin saludos, sin firmas.`;
 
+/**
+ * Genera el resumen diario en Markdown a partir de {@link SummaryInput}.
+ * @returns El texto del resumen (Markdown), listo para guardar/mostrar.
+ */
 export async function generateSummary(input: SummaryInput): Promise<string> {
   const userPrompt = JSON.stringify({
     fecha: input.day,

@@ -1,3 +1,12 @@
+/**
+ * Asistente de IA para notas Obsidian.
+ *
+ * Dos capacidades: crear una nota nueva desde una descripción
+ * ({@link aiCreateNote} → JSON con título, carpeta, scope, tags y contenido) y
+ * editar el contenido de una existente ({@link aiEditNote}) en varios modos
+ * (mejorar, expandir, resumir, continuar o instrucción libre). Usa las tools
+ * del vault para evitar duplicados y mantener wikilinks coherentes.
+ */
 import { runAgent } from './ai-agent';
 
 const MODEL = process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile';
@@ -12,6 +21,7 @@ REGLAS:
 - No inventes hechos ni URLs.
 - Si la nota está vacía y el usuario pide crear contenido, créalo desde cero.`;
 
+/** Modos de edición asistida de una nota (`custom` = instrucción libre del usuario). */
 export type AiMode = 'improve' | 'expand' | 'summarize' | 'continue' | 'custom';
 
 const QUICK_PROMPTS: Record<Exclude<AiMode, 'custom'>, string> = {
@@ -58,6 +68,7 @@ REGLAS
 - Wikilinks [[X]] solo si verificaste que existen.
 - No inventes URLs ni hechos.`;
 
+/** Resultado de {@link aiCreateNote}: la nota generada lista para crear en el vault. */
 interface CreateNoteOutput {
   title: string;
   filename: string;
@@ -67,6 +78,14 @@ interface CreateNoteOutput {
   content: string;
 }
 
+/**
+ * Genera una nota nueva a partir de una descripción libre (usa Gemini).
+ * Sanea el título/filename y valida `scope`; degrada a defaults si la IA falla.
+ * @param prompt Descripción de la nota a crear.
+ * @param vaultMap Mapa del vault para grounding.
+ * @param preferredFolder Carpeta forzada por el usuario (si la hay).
+ * @throws Si la IA no devuelve un título usable.
+ */
 export async function aiCreateNote(
   prompt: string,
   vaultMap: string,
@@ -114,6 +133,12 @@ export async function aiCreateNote(
   };
 }
 
+/**
+ * Reescribe el contenido de una nota según el modo elegido.
+ * Modos cosméticos van a Groq (rápido); los de razonamiento a Gemini (calidad).
+ * Quita el cercado ```markdown``` si el modelo lo añade.
+ * @returns El nuevo contenido Markdown de la nota.
+ */
 export async function aiEditNote(
   content: string,
   mode: AiMode,

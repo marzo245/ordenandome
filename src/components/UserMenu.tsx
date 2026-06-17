@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Session } from 'next-auth';
 
+/** Menú desplegable del usuario (avatar/nombre + acciones, p. ej. cerrar sesión). */
 export default function UserMenu({
   session,
   children,

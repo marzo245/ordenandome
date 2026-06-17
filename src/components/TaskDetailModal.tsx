@@ -37,6 +37,7 @@ type PatchPayload = Partial<{
 
 type SaveState = 'idle' | 'saving' | 'saved';
 
+/** Modal de detalle/edición de una tarea: campos, propiedades, subtareas y chat de IA. */
 export default function TaskDetailModal({
   task,
   allTasks,

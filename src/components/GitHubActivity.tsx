@@ -1,5 +1,6 @@
 import type { GitHubActivity as Activity } from '@/lib/types';
 
+/** Lista compacta de la actividad reciente de GitHub (commits y PRs). */
 export default function GitHubActivity({ items }: { items: Activity[] }) {
   return (
     <section>

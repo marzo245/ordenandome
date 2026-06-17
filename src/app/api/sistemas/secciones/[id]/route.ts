@@ -1,3 +1,9 @@
+/**
+ * API REST de una acción concreta (`/api/sistemas/secciones/[id]`).
+ * - GET    → devuelve la acción (404 si no existe).
+ * - PATCH  → actualiza campos (incluye `pasos`; refresca `updated_at`).
+ * - DELETE → borra la acción.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, sistema_secciones } from '@/db';
 import { eq } from 'drizzle-orm';

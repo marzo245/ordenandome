@@ -188,6 +188,12 @@ function Chip({ children }: { children: React.ReactNode }) {
 /* Root — tabs (Sistemas / Acciones), igual que KO (Catálogo / Subprocesos) */
 /* ================================================================== */
 
+/**
+ * Gestor de la sección Sistemas. Tablero con dos pestañas: los sistemas y sus
+ * acciones (incluido el flujo multi-sistema `pasos`). CRUD contra
+ * `/api/sistemas` y `/api/sistemas/secciones`, con editores Markdown que
+ * soportan pegar/arrastrar imágenes.
+ */
 export default function SistemasManager({
   initial,
   initialSections,

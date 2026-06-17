@@ -1,3 +1,8 @@
+/**
+ * Endpoint del planner de tareas (GUITO).
+ * - POST /api/ai/plan → recibe `{ messages }`, carga tareas + mapa del vault
+ *   como contexto y devuelve un `PlannerResult` (clarify / propose / propose_multi).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tasks } from '@/db';
 import { planTask, type ChatMessage } from '@/lib/groq-planner';

@@ -1,11 +1,21 @@
+/**
+ * Asistente de planificación de tareas (el "planner" de GUITO).
+ *
+ * Conversa con el usuario y decide entre: pedir aclaración, proponer una sola
+ * tarea, o proponer una tarea padre con subtareas. Devuelve siempre un
+ * {@link PlannerResult} (JSON con `action`). Puede usar las tools del vault
+ * para fundamentar la propuesta en proyectos/notas existentes.
+ */
 import type { Task } from '@/db';
 import { runAgent } from './ai-agent';
 
+/** Turno de la conversación con el planner. */
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
 }
 
+/** Borrador de tarea propuesto por la IA (la confirma el usuario antes de crearla). */
 export interface TaskDraft {
   title: string;
   description: string | null;
@@ -16,6 +26,7 @@ export interface TaskDraft {
   estimated_hours: number | null;
 }
 
+/** Resultado del planner: aclarar, proponer una tarea, o proponer padre + subtareas. */
 export type PlannerResult =
   | { action: 'clarify'; message: string }
   | { action: 'propose'; message: string; draft: TaskDraft }
@@ -91,6 +102,14 @@ En propose_multi, parent y cada subtask incluyen los mismos campos del draft, in
 
 Si el usuario dice "sí"/"confirma" a un borrador previo: repite el último propose/propose_multi tal cual.`;
 
+/**
+ * Llama al LLM para planear a partir de la conversación y el contexto actual.
+ * @param messages Historial del chat con el usuario.
+ * @param tasks Tareas existentes (se filtran las `done` para el contexto).
+ * @param vaultMap Mapa compacto del vault para grounding.
+ * @returns El {@link PlannerResult} parseado y con el `type` normalizado.
+ * @throws Si el LLM devuelve una `action` desconocida.
+ */
 export async function planTask(
   messages: ChatMessage[],
   tasks: Task[],
@@ -135,6 +154,7 @@ export async function planTask(
   return parsed;
 }
 
+/** Tipos válidos de tarea; cualquier otro valor del LLM se degrada a "otro". */
 const VALID_TYPES: ReadonlyArray<TaskDraft['type']> = [
   'trabajo',
   'personal',
@@ -142,6 +162,7 @@ const VALID_TYPES: ReadonlyArray<TaskDraft['type']> = [
   'otro',
 ];
 
+/** Saneamiento defensivo: fuerza `draft.type` a un valor válido (in-place). */
 function normalizeDraftType(draft: TaskDraft): void {
   if (!VALID_TYPES.includes(draft.type)) {
     draft.type = 'otro';

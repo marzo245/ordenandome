@@ -1,6 +1,15 @@
+/**
+ * Contexto del vault Obsidian para los asistentes de IA.
+ *
+ * Provee dos niveles de grounding sobre `notes_cache`: un mapa compacto de la
+ * estructura ({@link buildVaultMap}) que cabe siempre en el system prompt, y
+ * una búsqueda por relevancia ({@link searchVault}) que el agente invoca como
+ * tool cuando necesita detalle. Más helpers de render y estimación de tokens.
+ */
 import { db, notes_cache } from '@/db';
 import { sql, or } from 'drizzle-orm';
 
+/** Carpetas "estratégicas" del vault que entran en el mapa de grounding. */
 const STRATEGIC_PREFIXES = [
   '01-Proyectos',
   '02-Areas',
@@ -18,6 +27,7 @@ const STOPWORDS = new Set([
   'this', 'that', 'the', 'a', 'an', 'is', 'are', 'to', 'for', 'with',
 ]);
 
+/** Normaliza a minúsculas sin acentos y parte en palabras ≥3 chars, sin stopwords. */
 function tokenize(s: string): string[] {
   return s
     .toLowerCase()
@@ -27,6 +37,7 @@ function tokenize(s: string): string[] {
     .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
 }
 
+/** Una nota encontrada por {@link searchVault} (con excerpt recortado). */
 export interface VaultMatch {
   path: string;
   title: string;
@@ -123,6 +134,7 @@ export async function searchVault(query: string, limit = 12): Promise<VaultMatch
   }));
 }
 
+/** Formatea matches como lista Markdown con wikilinks, tags y excerpt. */
 export function renderMatches(matches: VaultMatch[]): string {
   if (!matches.length) return '(sin notas relevantes)';
   return matches
@@ -133,6 +145,7 @@ export function renderMatches(matches: VaultMatch[]): string {
     .join('\n');
 }
 
+/** Estimación grosera de tokens (~4 chars/token) para acotar el contexto. */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }

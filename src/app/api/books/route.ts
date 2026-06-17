@@ -1,3 +1,8 @@
+/**
+ * API REST de la lista de lectura (colección).
+ * - GET  /api/books → lista los libros (más recientes primero).
+ * - POST /api/books → añade un libro a la lista.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, reading_list } from '@/db';
 import { desc } from 'drizzle-orm';

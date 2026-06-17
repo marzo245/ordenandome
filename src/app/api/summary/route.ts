@@ -1,3 +1,9 @@
+/**
+ * Resumen diario generado por IA.
+ * - GET  /api/summary → devuelve el resumen del día (lo genera si no existe).
+ * - POST /api/summary → fuerza la regeneración del resumen de hoy.
+ * Accesible vía CRON_SECRET (ver middleware) para generarlo automáticamente.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, tasks, github_activity, daily_summaries } from '@/db';
 import { and, eq, gte, lte, ne } from 'drizzle-orm';
@@ -5,8 +11,10 @@ import { fetchActivity } from '@/lib/github';
 import { generateSummary } from '@/lib/groq';
 import { fetchNews } from '@/lib/news';
 
+/** Fecha de hoy en formato YYYY-MM-DD. */
 const today = () => new Date().toISOString().slice(0, 10);
 
+/** Reúne tareas + actividad + noticias del día, llama a la IA y guarda el resumen. */
 async function regenerate(): Promise<{ content: string; day: string }> {
   const day = today();
 

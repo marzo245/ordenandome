@@ -2,6 +2,7 @@ import type { Session } from 'next-auth';
 import type { ReactNode } from 'react';
 import UserMenu from './UserMenu';
 
+/** Barra superior: botón de menú (móvil), título y menú de usuario. */
 export default function Topbar({
   session,
   onMenuClick,

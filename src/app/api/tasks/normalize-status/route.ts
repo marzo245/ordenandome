@@ -1,3 +1,8 @@
+/**
+ * Mantenimiento: recalcula el estado de cada tarea padre a partir de sus hijos.
+ * - POST /api/tasks/normalize-status → recorre todas las tareas y corrige el
+ *   estado de los padres (= mínimo de sus subtareas).
+ */
 import { NextResponse } from 'next/server';
 import { db, tasks } from '@/db';
 import { eq, isNotNull } from 'drizzle-orm';

@@ -1,6 +1,7 @@
 import { db, notes_cache } from '@/db';
 import { desc } from 'drizzle-orm';
 
+/** Vista previa (server component) de las notas recientes del vault para el tablero. */
 export default async function NotesPreview() {
   const recent = await db
     .select({

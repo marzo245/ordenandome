@@ -1,3 +1,8 @@
+/**
+ * Sincronización del vault Obsidian (GitHub → `notes_cache` + grafo de enlaces).
+ * - POST /api/notes/sync → baja todos los .md, los parsea y refresca la cache,
+ *   los backlinks (`note_links`). Accesible vía CRON_SECRET (ver middleware).
+ */
 import { NextResponse } from 'next/server';
 import { db, notes_cache, note_links, tasks } from '@/db';
 import { listVaultMarkdown, getBlob, parseNote } from '@/lib/obsidian';

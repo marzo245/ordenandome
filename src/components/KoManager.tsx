@@ -81,6 +81,11 @@ const SISTEMA_FILTERS = ['Todos', 'Salesforce', 'Opera', 'SAP', 'eCO'];
 /* Root                                                               */
 /* ================================================================== */
 
+/**
+ * Gestor de la sección KO (errores conocidos). Tablero con dos pestañas:
+ * el catálogo de KOs y los subprocesos. Permite ver/crear/editar/borrar cada
+ * entrada contra `/api/ko` y `/api/ko/subprocesos`.
+ */
 export default function KoManager({
   initialEntries,
   initialSubprocesos,

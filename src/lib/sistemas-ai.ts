@@ -1,6 +1,17 @@
+/**
+ * Asistente de IA de la sección "Sistemas" (doc operativa de OPERA, eCO,
+ * Salesforce, ForceBeat, Beats, SAP).
+ *
+ * Expone dos funciones: {@link sistemasAssistant} (chat multimodal que responde
+ * o propone crear/editar sistemas y acciones, devolviendo un
+ * {@link SistemaAiResult}) y {@link suggestAccionPasos} (sugiere el flujo
+ * multi-sistema de una acción). Como en KO, la IA referencia entidades por
+ * NOMBRE y el cliente las resuelve a id; los helpers sanean la salida del LLM.
+ */
 import type { Sistema, SistemaSeccion } from '@/db';
 import { runAgent } from './ai-agent';
 
+/** Borrador de un sistema tal como lo propone la IA (campos = columnas de `sistemas`). */
 export interface SistemaDraft {
   nombre: string;
   descripcion: string | null;
@@ -25,6 +36,7 @@ export interface AccionDraft {
   pasos: AccionDraftPaso[];
 }
 
+/** Salida del asistente: aclarar, responder, o proponer crear/editar un sistema o una acción. */
 export type SistemaAiResult =
   | { action: 'clarify'; message: string }
   | { action: 'answer'; message: string }
@@ -126,6 +138,7 @@ Ejemplos (uno por cada action):
 
 Si el usuario dice "sí"/"confirma" a un borrador previo, repite el último propose tal cual.`;
 
+/** Resume los sistemas (nombre · rol · descripción) para el system prompt. */
 function summarizeSistemas(sistemas: Sistema[]): string {
   if (sistemas.length === 0)
     return '(sin sistemas documentados aún)';
@@ -139,6 +152,7 @@ function summarizeSistemas(sistemas: Sistema[]): string {
     .join('\n');
 }
 
+/** Resume las acciones registradas por sistema (resuelve nombre desde el id). */
 function summarizeAcciones(
   sistemas: Sistema[],
   acciones: SistemaSeccion[]
@@ -169,11 +183,13 @@ function summarizeAcciones(
     .join('\n\n');
 }
 
+/** Recorta `s` a `n` caracteres añadiendo … si sobra. */
 function truncate(s: string, n: number): string {
   const t = s.trim().replace(/\s+/g, ' ');
   return t.length > n ? `${t.slice(0, n)}…` : t;
 }
 
+/** Sanea el array de pasos del LLM: descarta entradas inválidas y normaliza campos. */
 function normalizeAccionPasos(raw: unknown): AccionDraftPaso[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -189,6 +205,7 @@ function normalizeAccionPasos(raw: unknown): AccionDraftPaso[] {
     .filter((p): p is AccionDraftPaso => p !== null);
 }
 
+/** Completa un draft de acción parcial a un {@link AccionDraft} con tipos correctos. */
 function normalizeAccionDraft(raw: Partial<AccionDraft> | undefined): AccionDraft {
   const d = raw ?? {};
   return {
@@ -199,6 +216,7 @@ function normalizeAccionDraft(raw: Partial<AccionDraft> | undefined): AccionDraf
   };
 }
 
+/** Completa un draft de sistema parcial a un {@link SistemaDraft} con todos los campos. */
 function normalizeDraft(raw: Partial<SistemaDraft> | undefined): SistemaDraft {
   const d = raw ?? {};
   return {
@@ -219,6 +237,7 @@ const DRAFT_KEYS: (keyof SistemaDraft)[] = [
 ];
 
 // Patch parcial: deja SOLO claves válidas de SistemaDraft (no fuerza todos los campos).
+/** Patch parcial: deja solo las claves válidas de {@link SistemaDraft} que vengan presentes. */
 function normalizePatch(raw: unknown): Partial<SistemaDraft> {
   if (!raw || typeof raw !== 'object') return {};
   const src = raw as Record<string, unknown>;
@@ -233,6 +252,7 @@ function normalizePatch(raw: unknown): Partial<SistemaDraft> {
   return out;
 }
 
+/** Heurística: ¿el último mensaje del usuario parece una pregunta? (para preferir `answer`). */
 function looksLikeQuestion(
   messages: { role: string; content: string }[]
 ): boolean {
@@ -266,6 +286,13 @@ ${nombres}
 {"contenido":"<detalle en markdown>","pasos":[{"sistema":"<nombre exacto>","accion":"<qué se hace>","dato":"<dato para el siguiente paso o ''>"}]}`;
 
 /** Propone los pasos del flujo y completa el detalle markdown de una acción. */
+/**
+ * Sugiere con IA los pasos del flujo multi-sistema de una acción (y opcionalmente
+ * su detalle Markdown), a partir de su título/descripción.
+ * @param input Título, detalle actual, descripción libre y sistema inicial.
+ * @param sistemas Sistemas existentes (la IA solo puede usar estos nombres).
+ * @returns Los `pasos` saneados y el `contenido` (o null). Devuelve vacío si no hay sistemas o falla el parseo.
+ */
 export async function suggestAccionPasos(
   input: {
     titulo: string;
@@ -323,6 +350,12 @@ export async function suggestAccionPasos(
   }
 }
 
+/**
+ * Punto de entrada del asistente de Sistemas (chat multimodal).
+ * @param messages Conversación; cada turno puede llevar imágenes (capturas).
+ * @param sistemas Sistemas documentados (contexto del LLM).
+ * @returns Un {@link SistemaAiResult} parseado y saneado (degrada a `clarify` si algo falla).
+ */
 export async function sistemasAssistant(
   messages: { role: 'user' | 'assistant'; content: string; images?: string[] }[],
   sistemas: Sistema[],

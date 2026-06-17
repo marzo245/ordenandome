@@ -1,3 +1,9 @@
+/**
+ * Sincronización de actividad de GitHub.
+ * - GET /api/github/sync?days=N → trae commits/PRs de los últimos N días y los
+ *   inserta en `github_activity` (idempotente, `onConflictDoNothing`).
+ * Accesible vía CRON_SECRET (ver middleware).
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, github_activity } from '@/db';
 import { fetchActivity } from '@/lib/github';

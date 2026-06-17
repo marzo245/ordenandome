@@ -44,6 +44,7 @@ const TYPE_FILTERS: { key: TaskType | 'todos'; label: string }[] = [
   { key: 'otro', label: 'Otro' },
 ];
 
+/** Tablero Kanban de tareas (columnas todo/doing/done) con arrastrar-y-soltar (dnd-kit). */
 export default function TaskBoard({ initial }: { initial: Task[] }) {
   const [tasks, setTasks] = useState<Task[]>(initial);
   const [activeTask, setActiveTask] = useState<Task | null>(null);

@@ -1,3 +1,8 @@
+/**
+ * API REST de un libro de la lista de lectura (`/api/books/[id]`).
+ * - PATCH  → actualiza el libro (estado, notas, fechas…).
+ * - DELETE → quita el libro de la lista.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, reading_list } from '@/db';
 import { eq } from 'drizzle-orm';

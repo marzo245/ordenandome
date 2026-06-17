@@ -7,6 +7,7 @@ interface Props {
   children: React.ReactNode;
 }
 
+/** Sección plegable reutilizable: un título clicable que muestra/oculta su contenido. */
 export default function CollapsibleSection({
   title,
   defaultOpen = true,

@@ -1,8 +1,20 @@
+/**
+ * Definiciones y ejecutores de las "tools" que el LLM puede invocar.
+ *
+ * Cada entrada de {@link VAULT_TOOLS} junta la `def` (esquema que ve el modelo,
+ * formato OpenAI function-calling) con su `exec` (la implementación real que se
+ * ejecuta en el servidor). De ahí se derivan {@link TOOL_DEFS} (lo que se manda
+ * al LLM) y {@link TOOL_EXECUTORS} (el mapa nombre→ejecutor que usa runAgent).
+ *
+ * Las tools actuales dan al agente acceso de lectura al vault Obsidian y a las
+ * tareas, para que pueda "fundamentar" sus respuestas en datos reales.
+ */
 import { db, notes_cache, tasks } from '@/db';
 import { sql, or, eq } from 'drizzle-orm';
 import { searchVault, buildVaultMap } from './vault-context';
 import { getNoteContent } from './obsidian';
 
+/** Esquema de una tool en formato OpenAI function-calling (lo que ve el modelo). */
 export interface ToolDef {
   type: 'function';
   function: {
@@ -16,8 +28,10 @@ export interface ToolDef {
   };
 }
 
+/** Implementación de una tool: recibe los args parseados y devuelve texto para el modelo. */
 export type ToolExecutor = (args: Record<string, unknown>) => Promise<string>;
 
+/** Catálogo de tools disponibles para el agente (definición + implementación juntas). */
 export const VAULT_TOOLS: { def: ToolDef; exec: ToolExecutor }[] = [
   {
     def: {
@@ -128,7 +142,9 @@ export const VAULT_TOOLS: { def: ToolDef; exec: ToolExecutor }[] = [
   },
 ];
 
+/** Solo los esquemas, para mandar al LLM en `body.tools`. */
 export const TOOL_DEFS = VAULT_TOOLS.map((t) => t.def);
+/** Mapa nombre→ejecutor que usa runAgent para resolver cada tool_call. */
 export const TOOL_EXECUTORS: Record<string, ToolExecutor> = Object.fromEntries(
   VAULT_TOOLS.map((t) => [t.def.function.name, t.exec])
 );

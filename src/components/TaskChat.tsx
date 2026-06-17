@@ -10,6 +10,7 @@ interface Message {
   created_at: string | Date;
 }
 
+/** Chat de IA específico de una tarea; habla con `/api/tasks/[id]/chat` para destrabarla. */
 export default function TaskChat({ taskId }: { taskId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');

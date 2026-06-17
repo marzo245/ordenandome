@@ -7,6 +7,7 @@ interface Props {
   onChange: (tags: string[]) => void;
 }
 
+/** Editor multi-selección de tags de una tarea (añadir/quitar etiquetas). */
 export default function TagsMultiSelect({ value, onChange }: Props) {
   const [input, setInput] = useState('');
 

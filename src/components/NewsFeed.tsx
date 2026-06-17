@@ -37,6 +37,7 @@ function hostFromUrl(url: string | null): string | null {
   }
 }
 
+/** Feed de noticias técnicas por nicho; las carga de `/api/news` y permite filtrar. */
 export default function NewsFeed() {
   const [items, setItems] = useState<NewsItem[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
