@@ -139,10 +139,11 @@ export async function POST(req: NextRequest) {
       const errorTexto =
         labelRaw == null || String(labelRaw).trim() === '' ? null : String(labelRaw).trim();
 
-      // Doble pasada: 1) ECO_Notes (incluye el código del error, más preciso);
-      // 2) si no cruza, el "Error normalizado". Solo coincidencia única.
-      let ko = matchUnico(fila[columnaMatch]);
-      if (!ko && columnaLabel !== columnaMatch) ko = matchUnico(fila[columnaLabel]);
+      // Doble pasada: 1) "Error normalizado" (criterio principal, lo que el
+      // usuario normaliza y mantiene); 2) si no cruza o es ambiguo, desempata por
+      // ECO_Notes (el crudo incluye el código del error). Solo coincidencia única.
+      let ko = matchUnico(fila[columnaLabel]);
+      if (!ko && columnaLabel !== columnaMatch) ko = matchUnico(fila[columnaMatch]);
       if (ko) conocidas++;
 
       return {
