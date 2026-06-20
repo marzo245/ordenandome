@@ -124,6 +124,14 @@ export async function POST(req: NextRequest) {
       .map((ko) => ({ id: ko.id, codigo: ko.codigo, n: normError(ko.error) }))
       .filter((k) => k.n.length >= 8);
 
+    // Devuelve el KO si EXACTAMENTE uno está contenido en el texto (ambiguo → null).
+    const matchUnico = (txt: unknown): (typeof indice)[number] | null => {
+      const t = normError(txt);
+      if (!t) return null;
+      const hits = indice.filter((k) => t.includes(k.n));
+      return hits.length === 1 ? hits[0] : null;
+    };
+
     let conocidas = 0;
     const casosPre = filas.map((fila) => {
       // Etiqueta legible para agrupar pendientes (el "Error normalizado").
@@ -131,10 +139,10 @@ export async function POST(req: NextRequest) {
       const errorTexto =
         labelRaw == null || String(labelRaw).trim() === '' ? null : String(labelRaw).trim();
 
-      // Cruce por contención contra el mensaje crudo (incluye el código del error).
-      const en = normError(fila[columnaMatch]);
-      const hits = en ? indice.filter((k) => en.includes(k.n)) : [];
-      const ko = hits.length === 1 ? hits[0] : null; // ambiguo (>1) → pendiente
+      // Doble pasada: 1) ECO_Notes (incluye el código del error, más preciso);
+      // 2) si no cruza, el "Error normalizado". Solo coincidencia única.
+      let ko = matchUnico(fila[columnaMatch]);
+      if (!ko && columnaLabel !== columnaMatch) ko = matchUnico(fila[columnaLabel]);
       if (ko) conocidas++;
 
       return {
