@@ -41,7 +41,9 @@ El build de Render ejecuta `npm ci && npm run build`, y **`next build` corre ESL
 - **El schema NO se aplica solo.** Tras cambiar `schema.ts`, hay que aplicar el DDL a Neon (vía `npm run db:push`, o ejecutando el `ALTER/CREATE` directamente contra `DATABASE_URL`). Si una tabla/columna falta en Neon, la página revienta con `Failed query: ...`.
 - **Ojo:** el MCP de Supabase apunta a OTRO proyecto (no tiene las tablas de esta app). La DB real es Neon.
 
-Tablas clave: `tasks`, `notes`/`note_links`, `sistemas`, `sistema_secciones` (acciones de cada sistema; columna `pasos` jsonb = flujo multi-sistema), `ko_*` (catálogo + subprocesos), `github_activity`, `daily_summaries`.
+Tablas clave: `tasks`, `notes`/`note_links`, `sistemas`, `sistema_secciones` (acciones de cada sistema; columna `pasos` jsonb = flujo multi-sistema), `ko_entries`/`ko_subprocesos` (catálogo + subprocesos), `ko_import_lotes`/`ko_import_casos` (importación de Excel de KO altas: un lote por subida, un caso por fila; `fila` jsonb = la fila cruda, `tipo` conocida|desconocida, `estado` pendiente|resuelto), `github_activity`, `daily_summaries`.
+
+**Importación de KO altas** (`POST /api/ko/import`, usa `xlsx`/SheetJS server-side): lee **solo la hoja 1**, autodetecta la columna de código (si no puede, responde `{ needsColumn, columnas }` y el cliente la elige) y cruza cada fila **por código exacto** contra `ko_entries.codigo` — **sin IA, para no gastar tokens**. Las conocidas (código en catálogo) van a la worklist «Conocidas» con su plan de acción; las desconocidas a «Pendientes», desde donde se promueven a KO (`/api/ko/casos/[id]/promover`, modo `link` a un KO existente o `create` reusando `EntryEditor`). Casos: `/api/ko/casos`; lotes: `/api/ko/lotes/[id]` (borra en cascada).
 
 ## Estructura
 
@@ -55,6 +57,7 @@ src/components/
   DashboardShell.tsx  # layout global: Topbar + Sidebar + botones flotantes + GUITO contextual
   Sidebar.tsx         # navegación de primer nivel (usa next/link)
   KoManager / SistemasManager / TaskBoard ...   # gestores por sección
+                      # KoManager: tabs Catálogo · Subprocesos · Conocidas (worklist) · Pendientes (bandeja import)
   KoAiChat / SistemasAiChat / TaskPlannerModal  # asistentes (modales)
   GuitoWalker / LottiePlayer / AiLottieButton   # mascota GUITO (public/guito.json)
 src/lib/

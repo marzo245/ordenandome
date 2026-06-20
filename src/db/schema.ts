@@ -250,6 +250,52 @@ export type NewKoEntry = typeof ko_entries.$inferInsert;
 export type KoSubproceso = typeof ko_subprocesos.$inferSelect;
 export type NewKoSubproceso = typeof ko_subprocesos.$inferInsert;
 
+// Importación de Excel de "KO altas": cada subida es un lote y cada fila un caso.
+// Los casos se cruzan por código contra `ko_entries` y se gestionan como worklist.
+export const ko_import_lotes = pgTable('ko_import_lotes', {
+  id: uuid().primaryKey().default(sql`gen_random_uuid()`),
+  nombre_archivo: text().notNull(),
+  total: integer().notNull().default(0),
+  conocidas: integer().notNull().default(0),
+  desconocidas: integer().notNull().default(0),
+  columna_codigo: text(),                 // cabecera del Excel usada como código
+  created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+});
+
+// Un caso = una fila del Excel ya cruzada con el catálogo.
+export const ko_import_casos = pgTable(
+  'ko_import_casos',
+  {
+    id: uuid().primaryKey().default(sql`gen_random_uuid()`),
+    lote_id: uuid()
+      .notNull()
+      .references(() => ko_import_lotes.id, { onDelete: 'cascade' }),
+    fila: jsonb()
+      .$type<Record<string, string | number | null>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),          // fila cruda del Excel
+    codigo: text(),                        // código detectado (puede ser null)
+    tipo: text({ enum: ['conocida', 'desconocida'] }).notNull(),
+    ko_entry_id: uuid().references(() => ko_entries.id, { onDelete: 'set null' }),
+    estado: text({ enum: ['pendiente', 'resuelto'] }).notNull().default('pendiente'),
+    notas: text(),
+    resolved_at: timestamp({ withTimezone: true }),
+    created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updated_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('idx_ko_casos_lote').on(t.lote_id),
+    index('idx_ko_casos_tipo_estado').on(t.tipo, t.estado),
+    index('idx_ko_casos_codigo').on(t.codigo),
+    index('idx_ko_casos_ko').on(t.ko_entry_id),
+  ]
+);
+
+export type KoImportLote = typeof ko_import_lotes.$inferSelect;
+export type NewKoImportLote = typeof ko_import_lotes.$inferInsert;
+export type KoImportCaso = typeof ko_import_casos.$inferSelect;
+export type NewKoImportCaso = typeof ko_import_casos.$inferInsert;
+
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
 export type GithubActivityRow = typeof github_activity.$inferSelect;

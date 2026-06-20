@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { KoEntry, KoSubproceso } from '@/db';
+import type { KoEntry, KoSubproceso, KoImportCaso } from '@/db';
 import MarkdownImageTextarea from './MarkdownImageTextarea';
 
 /* ------------------------------------------------------------------ */
@@ -96,6 +97,22 @@ function Chip({
 
 const SISTEMA_FILTERS = ['Todos', 'Salesforce', 'Opera', 'SAP', 'eCO'];
 
+/**
+ * Resuelve una referencia de subproceso (código o nombre) contra el catálogo de
+ * subprocesos. Compartido por el detalle del KO y la worklist de conocidas.
+ */
+function resolveSubproceso(
+  ref: string,
+  subprocesos: KoSubproceso[],
+): KoSubproceso | null {
+  const r = ref.trim().toLowerCase();
+  return (
+    subprocesos.find((s) => (s.codigo ?? '').toLowerCase() === r) ??
+    subprocesos.find((s) => (s.nombre ?? '').toLowerCase() === r) ??
+    null
+  );
+}
+
 /* ================================================================== */
 /* Root                                                               */
 /* ================================================================== */
@@ -105,21 +122,41 @@ const SISTEMA_FILTERS = ['Todos', 'Salesforce', 'Opera', 'SAP', 'eCO'];
  * el catálogo de KOs y los subprocesos. Permite ver/crear/editar/borrar cada
  * entrada contra `/api/ko` y `/api/ko/subprocesos`.
  */
+type Tab = 'catalogo' | 'subprocesos' | 'conocidas' | 'pendientes';
+
 export default function KoManager({
   initialEntries,
   initialSubprocesos,
+  initialCasos,
 }: {
   initialEntries: KoEntry[];
   initialSubprocesos: KoSubproceso[];
+  initialCasos: KoImportCaso[];
 }) {
-  const [tab, setTab] = useState<'catalogo' | 'subprocesos'>('catalogo');
+  const router = useRouter();
+  const [tab, setTab] = useState<Tab>('catalogo');
   // Subproceso a abrir al navegar desde un caso del catálogo (deep-link entre tabs).
   const [openSubprocesoId, setOpenSubprocesoId] = useState<string | null>(null);
+
+  // Casos importados: estado compartido por las pestañas Conocidas y Pendientes.
+  // Se resincroniza desde el server tras router.refresh() (importar/promover).
+  const [casos, setCasos] = useState<KoImportCaso[]>(initialCasos);
+  useEffect(() => setCasos(initialCasos), [initialCasos]);
+
+  const pendientesCount = useMemo(
+    () => casos.filter((c) => c.tipo === 'desconocida').length,
+    [casos],
+  );
+
+  function goToSubproceso(id: string) {
+    setOpenSubprocesoId(id);
+    setTab('subprocesos');
+  }
 
   return (
     <div className="flex flex-col gap-5">
       {/* Tabs (Notion-style underline) */}
-      <div className="flex items-center gap-5 border-b border-[var(--border)]">
+      <div className="flex items-center gap-5 border-b border-[var(--border)] overflow-x-auto">
         <TabButton active={tab === 'catalogo'} onClick={() => setTab('catalogo')}>
           Catálogo
         </TabButton>
@@ -129,22 +166,50 @@ export default function KoManager({
         >
           Subprocesos
         </TabButton>
+        <TabButton active={tab === 'conocidas'} onClick={() => setTab('conocidas')}>
+          Conocidas
+        </TabButton>
+        <TabButton active={tab === 'pendientes'} onClick={() => setTab('pendientes')}>
+          Pendientes
+          {pendientesCount > 0 && (
+            <span className="ml-1.5 inline-flex items-center justify-center text-[10px] min-w-[1.1rem] px-1 rounded-full bg-[var(--accent)] text-white align-middle">
+              {pendientesCount}
+            </span>
+          )}
+        </TabButton>
       </div>
 
-      {tab === 'catalogo' ? (
+      {tab === 'catalogo' && (
         <CatalogoTab
           initial={initialEntries}
           subprocesos={initialSubprocesos}
-          onOpenSubproceso={(id) => {
-            setOpenSubprocesoId(id);
-            setTab('subprocesos');
-          }}
+          onOpenSubproceso={goToSubproceso}
         />
-      ) : (
+      )}
+      {tab === 'subprocesos' && (
         <SubprocesosTab
           initial={initialSubprocesos}
           openId={openSubprocesoId}
           onOpened={() => setOpenSubprocesoId(null)}
+        />
+      )}
+      {tab === 'conocidas' && (
+        <ConocidasTab
+          entries={initialEntries}
+          subprocesos={initialSubprocesos}
+          casos={casos}
+          setCasos={setCasos}
+          onImported={() => router.refresh()}
+          onOpenSubproceso={goToSubproceso}
+        />
+      )}
+      {tab === 'pendientes' && (
+        <PendientesTab
+          entries={initialEntries}
+          casos={casos}
+          setCasos={setCasos}
+          onImported={() => router.refresh()}
+          onChanged={() => router.refresh()}
         />
       )}
     </div>
@@ -509,16 +574,6 @@ function EntryView({
   onOpenSubproceso: (id: string) => void;
 }) {
   const subs = selected.subprocesos ?? [];
-  // El array `subprocesos` del KO guarda códigos (p. ej. SP-001); resolvemos
-  // contra el catálogo por código y, como respaldo, por nombre.
-  function resolveSub(ref: string): KoSubproceso | null {
-    const r = ref.trim().toLowerCase();
-    return (
-      subprocesos.find((s) => (s.codigo ?? '').toLowerCase() === r) ??
-      subprocesos.find((s) => (s.nombre ?? '').toLowerCase() === r) ??
-      null
-    );
-  }
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-start justify-between gap-3">
@@ -578,7 +633,7 @@ function EntryView({
           <SubLabel>Subprocesos</SubLabel>
           <div className="flex flex-wrap gap-1.5">
             {subs.map((s) => {
-              const match = resolveSub(s);
+              const match = resolveSubproceso(s, subprocesos);
               return match ? (
                 <Chip
                   key={s}
@@ -1201,6 +1256,723 @@ function SubprocesosTab({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
+/* Importación de Excel (compartido por Conocidas y Pendientes)       */
+/* ================================================================== */
+
+/** Pares [columna, valor] no vacíos de una fila del Excel. */
+function filaEntries(fila: KoImportCaso['fila']): [string, string][] {
+  return Object.entries(fila)
+    .filter(([, v]) => v != null && String(v).trim() !== '')
+    .map(([k, v]) => [k, String(v)]);
+}
+
+/** Resumen en una línea de la fila del Excel (para listas). */
+function filaResumen(fila: KoImportCaso['fila']): string {
+  return filaEntries(fila)
+    .map(([, v]) => v)
+    .join(' · ');
+}
+
+/**
+ * Zona de subida del Excel de KO altas. Sube a `/api/ko/import`; si el server no
+ * puede detectar la columna de código, pide elegirla y reintenta. Al terminar,
+ * llama a `onImported()` (que refresca los casos desde el server).
+ */
+function ImportarExcel({ onImported }: { onImported: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [resumen, setResumen] = useState<string | null>(null);
+  const [columnas, setColumnas] = useState<string[] | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function subir(file: File, columnaCodigo?: string) {
+    setBusy(true);
+    setError(null);
+    setResumen(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      if (columnaCodigo) fd.append('columna_codigo', columnaCodigo);
+      const res = await fetch('/api/ko/import', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Falló la subida (${res.status})`);
+
+      if (data.needsColumn) {
+        // No se pudo detectar la columna: pedimos elegir y reintentamos.
+        setColumnas(data.columnas as string[]);
+        setPendingFile(file);
+        return;
+      }
+
+      setColumnas(null);
+      setPendingFile(null);
+      const lote = data.lote as { conocidas: number; desconocidas: number; total: number };
+      setResumen(
+        `${lote.total} filas · ${lote.conocidas} conocidas · ${lote.desconocidas} pendientes`,
+      );
+      onImported();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al importar');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) subir(file);
+    // Permite re-subir el mismo archivo (reset del input).
+    e.target.value = '';
+  }
+
+  return (
+    <div className="rounded-lg border border-dashed border-[var(--border)] bg-[var(--surface)] p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={busy}
+          className="text-sm px-3 py-1.5 rounded bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {busy ? 'Importando…' : 'Subir Excel de KO altas'}
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={onPick}
+          className="hidden"
+          aria-label="Subir Excel de KO altas"
+        />
+        <p className="text-xs text-[var(--muted)]">
+          Solo se lee la hoja 1. Cruza por código contra el catálogo.
+        </p>
+      </div>
+
+      {columnas && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-[var(--muted)]">
+            No detecté la columna de código. ¿Cuál es?
+          </span>
+          <select
+            disabled={busy}
+            defaultValue=""
+            onChange={(e) => {
+              if (e.target.value && pendingFile) subir(pendingFile, e.target.value);
+            }}
+            className={`${inputCls} sm:w-56`}
+            aria-label="Columna de código"
+          >
+            <option value="" disabled>
+              Elegir columna…
+            </option>
+            {columnas.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {resumen && (
+        <p className="mt-3 text-sm text-[var(--text)]">✓ {resumen}</p>
+      )}
+      {error && <p className="mt-3 text-sm text-[var(--danger)]">{error}</p>}
+    </div>
+  );
+}
+
+/* ================================================================== */
+/* Tab 3 — Conocidas (worklist)                                       */
+/* ================================================================== */
+
+type SetCasos = React.Dispatch<React.SetStateAction<KoImportCaso[]>>;
+
+const ESTADO_FILTERS = ['Pendientes', 'Resueltos', 'Todos'] as const;
+type EstadoFilter = (typeof ESTADO_FILTERS)[number];
+
+/**
+ * Worklist de casos cuyo código YA está en el catálogo. Agrupa por KO, muestra
+ * su plan de acción (clasificación, sistema de solución, subprocesos, resolución)
+ * y permite marcar cada caso como resuelto e ir avanzando.
+ */
+function ConocidasTab({
+  entries,
+  subprocesos,
+  casos,
+  setCasos,
+  onImported,
+  onOpenSubproceso,
+}: {
+  entries: KoEntry[];
+  subprocesos: KoSubproceso[];
+  casos: KoImportCaso[];
+  setCasos: SetCasos;
+  onImported: () => void;
+  onOpenSubproceso: (id: string) => void;
+}) {
+  const [estadoFilter, setEstadoFilter] = useState<EstadoFilter>('Pendientes');
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const entryById = useMemo(
+    () => new Map(entries.map((e) => [e.id, e])),
+    [entries],
+  );
+
+  const conocidas = useMemo(
+    () => casos.filter((c) => c.tipo === 'conocida'),
+    [casos],
+  );
+
+  const totalResueltas = conocidas.filter((c) => c.estado === 'resuelto').length;
+
+  // Agrupa por KO; cada grupo conserva su lista de casos (filtrada por estado).
+  const grupos = useMemo(() => {
+    const map = new Map<string, { ko: KoEntry | null; casos: KoImportCaso[] }>();
+    for (const c of conocidas) {
+      if (estadoFilter === 'Pendientes' && c.estado !== 'pendiente') continue;
+      if (estadoFilter === 'Resueltos' && c.estado !== 'resuelto') continue;
+      const key = c.ko_entry_id ?? `sin:${c.codigo ?? '—'}`;
+      if (!map.has(key)) {
+        map.set(key, { ko: c.ko_entry_id ? entryById.get(c.ko_entry_id) ?? null : null, casos: [] });
+      }
+      map.get(key)!.casos.push(c);
+    }
+    return [...map.values()];
+  }, [conocidas, estadoFilter, entryById]);
+
+  async function setEstado(caso: KoImportCaso, estado: 'pendiente' | 'resuelto') {
+    setBusyId(caso.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/ko/casos/${caso.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estado }),
+      });
+      if (!res.ok) throw new Error(`No se pudo actualizar (${res.status})`);
+      const updated: KoImportCaso = await res.json();
+      setCasos((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al actualizar');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <ImportarExcel onImported={onImported} />
+
+      {conocidas.length === 0 ? (
+        <p className="text-sm text-[var(--muted)] py-8 text-center">
+          Aún no hay casos conocidos. Sube un Excel de KO altas para empezar.
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {ESTADO_FILTERS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setEstadoFilter(s)}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                    estadoFilter === s
+                      ? 'border-[var(--text)] text-[var(--text)] font-medium'
+                      : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+            <p className="text-sm text-[var(--muted)]">
+              {totalResueltas}/{conocidas.length} resueltas
+            </p>
+          </div>
+
+          {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
+
+          {grupos.length === 0 ? (
+            <p className="text-sm text-[var(--muted)] py-8 text-center">
+              Nada en «{estadoFilter}».
+            </p>
+          ) : (
+            <div className="flex flex-col gap-4">
+              {grupos.map((g, i) => (
+                <GrupoConocidas
+                  key={g.ko?.id ?? `g${i}`}
+                  ko={g.ko}
+                  casos={g.casos}
+                  subprocesos={subprocesos}
+                  busyId={busyId}
+                  onResolver={(c) => setEstado(c, 'resuelto')}
+                  onReabrir={(c) => setEstado(c, 'pendiente')}
+                  onOpenSubproceso={onOpenSubproceso}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Tarjeta de un KO con su plan de acción y la lista de casos a gestionar. */
+function GrupoConocidas({
+  ko,
+  casos,
+  subprocesos,
+  busyId,
+  onResolver,
+  onReabrir,
+  onOpenSubproceso,
+}: {
+  ko: KoEntry | null;
+  casos: KoImportCaso[];
+  subprocesos: KoSubproceso[];
+  busyId: string | null;
+  onResolver: (c: KoImportCaso) => void;
+  onReabrir: (c: KoImportCaso) => void;
+  onOpenSubproceso: (id: string) => void;
+}) {
+  const subs = ko?.subprocesos ?? [];
+  return (
+    <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 flex flex-col gap-4">
+      <div className="min-w-0">
+        <div className="mono text-[11px] text-[var(--muted)] font-medium mb-1">
+          {ko?.codigo || casos[0]?.codigo || 'sin código'}
+        </div>
+        <h3 className="text-lg font-semibold tracking-tight">
+          {ko?.error ?? 'KO no encontrado en el catálogo'}
+        </h3>
+      </div>
+
+      {/* Plan de acción del KO */}
+      {ko && (
+        <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] p-3 flex flex-col gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Meta label="Clasificación" value={ko.clasificacion} />
+            <Meta label="Resuelve en" value={ko.sistema_solucion} />
+            <Meta label="Responsable" value={ko.responsable} />
+            <Meta label="Flujo" value={ko.flujo != null ? String(ko.flujo) : null} />
+          </div>
+          {subs.length > 0 && (
+            <div>
+              <SubLabel>Subprocesos</SubLabel>
+              <div className="flex flex-wrap gap-1.5">
+                {subs.map((s) => {
+                  const match = resolveSubproceso(s, subprocesos);
+                  return match ? (
+                    <Chip
+                      key={s}
+                      onClick={() => onOpenSubproceso(match.id)}
+                      title={`Ir al subproceso ${match.codigo} — ${match.nombre}`}
+                    >
+                      {s}
+                    </Chip>
+                  ) : (
+                    <Chip key={s}>{s}</Chip>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {ko.resolucion && (
+            <div>
+              <SubLabel>Resolución</SubLabel>
+              <Markdown value={ko.resolucion} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Casos a gestionar */}
+      <div className="flex flex-col divide-y divide-[var(--border)]">
+        {casos.map((c) => {
+          const resuelto = c.estado === 'resuelto';
+          const busy = busyId === c.id;
+          return (
+            <div
+              key={c.id}
+              className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0"
+            >
+              <p
+                className={`text-sm min-w-0 break-words ${
+                  resuelto ? 'text-[var(--muted)] line-through' : 'text-[var(--text)]'
+                }`}
+              >
+                {filaResumen(c.fila) || c.codigo || '—'}
+              </p>
+              {resuelto ? (
+                <button
+                  type="button"
+                  onClick={() => onReabrir(c)}
+                  disabled={busy}
+                  className="shrink-0 text-xs px-2.5 py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)] disabled:opacity-50"
+                >
+                  {busy ? '…' : 'Reabrir'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onResolver(c)}
+                  disabled={busy}
+                  className="shrink-0 text-xs px-2.5 py-1 rounded border border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
+                >
+                  {busy ? '…' : 'Resuelto ✓'}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
+/* Tab 4 — Pendientes (casos por gestionar / normalizar)              */
+/* ================================================================== */
+
+/** Construye un buffer de KO a partir de un caso pendiente (para promoverlo). */
+function casoToBuffer(caso: KoImportCaso): EntryBuffer {
+  const ecoNotes = filaEntries(caso.fila)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('\n');
+  return {
+    codigo: caso.codigo ?? '',
+    error: '',
+    eco_notes: ecoNotes,
+    sistema: '',
+    flujo: '',
+    clasificacion: '',
+    causa_raiz: '',
+    sistema_solucion: '',
+    responsable: '',
+    subprocesos: '',
+    resolucion: '',
+    documentacion: '',
+    flujograma_url: '',
+  };
+}
+
+/** Convierte un EntryBuffer al payload de creación de KO (mismo mapeo que el catálogo). */
+function bufferToKoData(b: EntryBuffer) {
+  const flujoNum = b.flujo.trim() === '' ? null : Number(b.flujo);
+  return {
+    codigo: b.codigo.trim() || null,
+    error: b.error,
+    eco_notes: b.eco_notes || null,
+    sistema: b.sistema || null,
+    flujo: Number.isNaN(flujoNum as number) ? null : flujoNum,
+    clasificacion: b.clasificacion || null,
+    causa_raiz: b.causa_raiz || null,
+    sistema_solucion: b.sistema_solucion || null,
+    responsable: b.responsable || null,
+    subprocesos: b.subprocesos
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    resolucion: b.resolucion || null,
+    documentacion: b.documentacion || null,
+    flujograma_url: b.flujograma_url || null,
+  };
+}
+
+/**
+ * Bandeja de casos cuyo código NO está en el catálogo: están pendientes de
+ * gestionar. Desde aquí se pueden vincular a un KO existente o promover a un KO
+ * nuevo (normalizándolos con su categoría y subproceso), o descartar.
+ */
+function PendientesTab({
+  entries,
+  casos,
+  setCasos,
+  onImported,
+  onChanged,
+}: {
+  entries: KoEntry[];
+  casos: KoImportCaso[];
+  setCasos: SetCasos;
+  onImported: () => void;
+  onChanged: () => void;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mode, setMode] = useState<'view' | 'promover'>('view');
+  const [buffer, setBuffer] = useState<EntryBuffer | null>(null);
+  const [linkId, setLinkId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const pendientes = useMemo(
+    () => casos.filter((c) => c.tipo === 'desconocida'),
+    [casos],
+  );
+  const selected = useMemo(
+    () => pendientes.find((c) => c.id === selectedId) ?? null,
+    [pendientes, selectedId],
+  );
+
+  function close() {
+    setSelectedId(null);
+    setMode('view');
+    setBuffer(null);
+    setLinkId('');
+    setError(null);
+  }
+
+  async function vincular() {
+    if (!selected || !linkId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/ko/casos/${selected.id}/promover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'link', ko_entry_id: linkId }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        throw new Error(d?.error || `No se pudo vincular (${res.status})`);
+      }
+      const { caso } = (await res.json()) as { caso: KoImportCaso };
+      setCasos((prev) => prev.map((c) => (c.id === caso.id ? caso : c)));
+      close();
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al vincular');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function promover() {
+    if (!selected || !buffer) return;
+    if (!buffer.error.trim()) {
+      setError('El error es obligatorio para crear el KO.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/ko/casos/${selected.id}/promover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'create', koData: bufferToKoData(buffer) }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        throw new Error(d?.error || `No se pudo promover (${res.status})`);
+      }
+      const { caso } = (await res.json()) as { caso: KoImportCaso };
+      setCasos((prev) => prev.map((c) => (c.id === caso.id ? caso : c)));
+      close();
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al promover');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function descartar() {
+    if (!selected) return;
+    if (!confirm('¿Descartar este caso pendiente?')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/ko/casos/${selected.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`No se pudo descartar (${res.status})`);
+      const removedId = selected.id;
+      setCasos((prev) => prev.filter((c) => c.id !== removedId));
+      close();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al descartar');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <ImportarExcel onImported={onImported} />
+
+      {pendientes.length === 0 ? (
+        <p className="text-sm text-[var(--muted)] py-8 text-center">
+          No hay casos pendientes. Los errores sin código en el catálogo aparecerán aquí.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wider text-[var(--muted)]">
+                <th className="font-medium pb-2 pr-3">Código</th>
+                <th className="font-medium pb-2">Caso</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pendientes.map((c) => (
+                <tr
+                  key={c.id}
+                  onClick={() => {
+                    setSelectedId(c.id);
+                    setMode('view');
+                    setBuffer(null);
+                    setLinkId('');
+                    setError(null);
+                  }}
+                  className="border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-hover)]"
+                >
+                  <td className="py-2 pr-3 mono font-medium whitespace-nowrap">
+                    {c.codigo || <span className="text-[var(--muted)] font-normal">—</span>}
+                  </td>
+                  <td className="py-2 max-w-[32rem] truncate text-[var(--muted)]">
+                    {filaResumen(c.fila) || '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Detalle / acciones */}
+      {selected && (
+        <div
+          className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto"
+          onClick={close}
+        >
+          <div
+            className="bg-[var(--bg)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-2xl my-8 max-h-[90vh] overflow-y-auto p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {error && <div className="mb-3 text-sm text-[var(--danger)]">{error}</div>}
+
+            {mode === 'promover' && buffer ? (
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-lg font-semibold">Promover a KO</h2>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('view');
+                      setBuffer(null);
+                      setError(null);
+                    }}
+                    className="text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)]"
+                  >
+                    ← Volver
+                  </button>
+                </div>
+                <p className="text-xs text-[var(--muted)]">
+                  Normaliza el error y asígnale clasificación y subproceso. Al guardar se
+                  crea el KO y el caso queda vinculado.
+                </p>
+                <EntryEditor
+                  buffer={buffer}
+                  setBuffer={setBuffer}
+                  busy={busy}
+                  onSave={promover}
+                  onCancel={() => {
+                    setMode('view');
+                    setBuffer(null);
+                  }}
+                  onRemove={descartar}
+                />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="mono text-[11px] text-[var(--muted)] font-medium mb-1">
+                      {selected.codigo || 'sin código'}
+                    </div>
+                    <h2 className="text-xl font-bold tracking-tight">Caso pendiente</h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={close}
+                    className="text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)]"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+
+                <div>
+                  <SubLabel>Fila del Excel</SubLabel>
+                  <pre className="text-xs mono whitespace-pre-wrap bg-[var(--surface)] border border-[var(--border)] rounded p-3 text-[var(--text)] overflow-x-auto">
+                    {filaEntries(selected.fila)
+                      .map(([k, v]) => `${k}: ${v}`)
+                      .join('\n') || '—'}
+                  </pre>
+                </div>
+
+                {/* Vincular a KO existente */}
+                <div>
+                  <SubLabel>Vincular a un KO existente</SubLabel>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <select
+                      value={linkId}
+                      onChange={(e) => setLinkId(e.target.value)}
+                      className={`${inputCls} flex-1`}
+                      aria-label="KO al que vincular"
+                    >
+                      <option value="">Elegir KO…</option>
+                      {entries.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {(e.codigo ? `${e.codigo} · ` : '') + e.error}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={vincular}
+                      disabled={busy || !linkId}
+                      className="text-sm px-3 py-1.5 rounded bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                      {busy ? '…' : 'Vincular'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-4">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBuffer(casoToBuffer(selected));
+                      setMode('promover');
+                      setError(null);
+                    }}
+                    disabled={busy}
+                    className="text-sm px-3 py-1.5 rounded border border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
+                  >
+                    Promover a KO nuevo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={descartar}
+                    disabled={busy}
+                    className="text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--danger)] disabled:opacity-50 ml-auto"
+                  >
+                    Descartar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

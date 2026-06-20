@@ -1,5 +1,5 @@
-import { db, tasks, ko_entries, ko_subprocesos } from '@/db';
-import { asc, sql } from 'drizzle-orm';
+import { db, tasks, ko_entries, ko_subprocesos, ko_import_casos } from '@/db';
+import { asc, desc, sql } from 'drizzle-orm';
 import { auth } from '@/auth';
 import DashboardShell from '@/components/DashboardShell';
 import LogoutButton from '@/components/LogoutButton';
@@ -8,11 +8,12 @@ import KoManager from '@/components/KoManager';
 export const dynamic = 'force-dynamic';
 
 export default async function KoPage() {
-  const [session, tasksRows, koRows, spRows] = await Promise.all([
+  const [session, tasksRows, koRows, spRows, casosRows] = await Promise.all([
     auth(),
     db.select().from(tasks).orderBy(sql`${tasks.due_date} ASC NULLS LAST`),
     db.select().from(ko_entries).orderBy(asc(ko_entries.codigo)),
     db.select().from(ko_subprocesos).orderBy(asc(ko_subprocesos.codigo)),
+    db.select().from(ko_import_casos).orderBy(desc(ko_import_casos.created_at)),
   ]);
 
   return (
@@ -32,7 +33,11 @@ export default async function KoPage() {
         </p>
       </div>
 
-      <KoManager initialEntries={koRows} initialSubprocesos={spRows} />
+      <KoManager
+        initialEntries={koRows}
+        initialSubprocesos={spRows}
+        initialCasos={casosRows}
+      />
     </DashboardShell>
   );
 }

@@ -53,3 +53,33 @@ alter table sistema_secciones add column if not exists pasos jsonb not null defa
 
 create index if not exists idx_sistema_secciones_sistema on sistema_secciones(sistema_id);
 create index if not exists idx_sistema_secciones_orden on sistema_secciones(orden);
+
+-- Importación de Excel de "KO altas": un lote por subida, un caso por fila.
+create table if not exists ko_import_lotes (
+  id             uuid primary key default gen_random_uuid(),
+  nombre_archivo text not null,
+  total          integer not null default 0,
+  conocidas      integer not null default 0,
+  desconocidas   integer not null default 0,
+  columna_codigo text,
+  created_at     timestamptz not null default now()
+);
+
+create table if not exists ko_import_casos (
+  id          uuid primary key default gen_random_uuid(),
+  lote_id     uuid not null references ko_import_lotes(id) on delete cascade,
+  fila        jsonb not null default '{}'::jsonb,
+  codigo      text,
+  tipo        text not null check (tipo in ('conocida','desconocida')),
+  ko_entry_id uuid references ko_entries(id) on delete set null,
+  estado      text not null default 'pendiente' check (estado in ('pendiente','resuelto')),
+  notas       text,
+  resolved_at timestamptz,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+
+create index if not exists idx_ko_casos_lote on ko_import_casos(lote_id);
+create index if not exists idx_ko_casos_tipo_estado on ko_import_casos(tipo, estado);
+create index if not exists idx_ko_casos_codigo on ko_import_casos(codigo);
+create index if not exists idx_ko_casos_ko on ko_import_casos(ko_entry_id);
