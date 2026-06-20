@@ -41,9 +41,6 @@ function normError(s: unknown): string {
     .trim();
 }
 
-// Cabeceras candidatas a "columna de error" (ya normalizadas con normHeader()).
-const CANDIDATAS_ERROR = ['errornormalizado', 'errornorm', 'error'];
-
 /** Elige qué hoja contiene los datos: `default_1` si existe, si no la de más filas. */
 function elegirHoja(wb: XLSX.WorkBook): string {
   const porNombre = wb.SheetNames.find((n) => normHeader(n) === 'default1');
@@ -61,15 +58,22 @@ function elegirHoja(wb: XLSX.WorkBook): string {
   return mejor;
 }
 
-/** Elige la columna del error. Devuelve null si es ambiguo o no se encuentra. */
-function detectarColumnaError(headers: string[], pedida: string | null): string | null {
+/**
+ * Columna para CRUZAR: el mensaje crudo del sistema (ECO_Notes), que incluye el
+ * código del error (p. ej. "EN 244") que distingue KOs con el mismo enunciado.
+ * Si no existe, cae al "Error normalizado".
+ */
+function detectarColumnaMatch(headers: string[], pedida: string | null): string | null {
   if (pedida && headers.includes(pedida)) return pedida;
-  // Probamos las candidatas en orden de preferencia.
-  for (const cand of CANDIDATAS_ERROR) {
-    const matches = headers.filter((h) => normHeader(h) === cand);
-    if (matches.length === 1) return matches[0];
-  }
-  return null;
+  const eco = headers.find((h) => normHeader(h).includes('econotes'));
+  if (eco) return eco;
+  const norm = headers.find((h) => normHeader(h) === 'errornormalizado');
+  return norm ?? null;
+}
+
+/** Columna ETIQUETA para agrupar las pendientes: el "Error normalizado" si existe. */
+function detectarColumnaLabel(headers: string[], fallback: string): string {
+  return headers.find((h) => normHeader(h) === 'errornormalizado') ?? fallback;
 }
 
 export async function POST(req: NextRequest) {
@@ -103,14 +107,15 @@ export async function POST(req: NextRequest) {
     }
 
     const headers = Object.keys(filas[0]);
-    const columnaError = detectarColumnaError(
+    const columnaMatch = detectarColumnaMatch(
       headers,
       typeof columnaPedida === 'string' ? columnaPedida : null
     );
-    if (!columnaError) {
+    if (!columnaMatch) {
       // No pudimos decidir la columna: que el usuario la elija y reintente.
       return NextResponse.json({ needsColumn: true, columnas: headers });
     }
+    const columnaLabel = detectarColumnaLabel(headers, columnaMatch);
 
     // Catálogo para el cruce por contención. Solo errores con suficiente longitud
     // (evita que frases muy cortas generen falsos positivos).
@@ -121,12 +126,13 @@ export async function POST(req: NextRequest) {
 
     let conocidas = 0;
     const casosPre = filas.map((fila) => {
-      const errorRaw = fila[columnaError];
+      // Etiqueta legible para agrupar pendientes (el "Error normalizado").
+      const labelRaw = fila[columnaLabel];
       const errorTexto =
-        errorRaw == null || String(errorRaw).trim() === '' ? null : String(errorRaw).trim();
-      const en = normError(errorTexto);
+        labelRaw == null || String(labelRaw).trim() === '' ? null : String(labelRaw).trim();
 
-      // Cruce por contención: la frase del KO está contenida en el error del caso.
+      // Cruce por contención contra el mensaje crudo (incluye el código del error).
+      const en = normError(fila[columnaMatch]);
       const hits = en ? indice.filter((k) => en.includes(k.n)) : [];
       const ko = hits.length === 1 ? hits[0] : null; // ambiguo (>1) → pendiente
       if (ko) conocidas++;
@@ -147,7 +153,7 @@ export async function POST(req: NextRequest) {
         total: casosPre.length,
         conocidas,
         desconocidas,
-        columna_codigo: columnaError,
+        columna_codigo: columnaMatch,
       })
       .returning();
 

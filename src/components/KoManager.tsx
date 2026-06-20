@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { KoEntry, KoSubproceso, KoImportCaso } from '@/db';
+import type { KoEntry, KoSubproceso, KoImportCaso, KoImportLote } from '@/db';
 import MarkdownImageTextarea from './MarkdownImageTextarea';
 
 /* ------------------------------------------------------------------ */
@@ -1289,7 +1289,37 @@ function ImportarExcel({ onImported }: { onImported: () => void }) {
   const [resumen, setResumen] = useState<string | null>(null);
   const [columnas, setColumnas] = useState<string[] | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [lotes, setLotes] = useState<KoImportLote[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const refrescarLotes = useCallback(async () => {
+    try {
+      const res = await fetch('/api/ko/lotes');
+      if (res.ok) setLotes(await res.json());
+    } catch {
+      // silencioso: la lista de importaciones es informativa
+    }
+  }, []);
+
+  useEffect(() => {
+    refrescarLotes();
+  }, [refrescarLotes]);
+
+  async function borrarLote(id: string) {
+    if (!confirm('¿Borrar esta importación y todas sus cuentas?')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/ko/lotes/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`No se pudo borrar (${res.status})`);
+      await refrescarLotes();
+      onImported();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al borrar');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function subir(file: File, columnaError?: string) {
     setBusy(true);
@@ -1318,6 +1348,7 @@ function ImportarExcel({ onImported }: { onImported: () => void }) {
         `${lote.total} cuentas${hoja} · ${lote.conocidas} conocidas · ${lote.desconocidas} pendientes`,
       );
       onImported();
+      refrescarLotes();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al importar');
     } finally {
@@ -1387,6 +1418,33 @@ function ImportarExcel({ onImported }: { onImported: () => void }) {
         <p className="mt-3 text-sm text-[var(--text)]">✓ {resumen}</p>
       )}
       {error && <p className="mt-3 text-sm text-[var(--danger)]">{error}</p>}
+
+      {lotes.length > 0 && (
+        <div className="mt-4 border-t border-[var(--border)] pt-3">
+          <SubLabel>Importaciones</SubLabel>
+          <div className="flex flex-col gap-1.5">
+            {lotes.map((l) => (
+              <div
+                key={l.id}
+                className="flex items-center justify-between gap-3 text-xs"
+              >
+                <span className="min-w-0 truncate text-[var(--muted)]">
+                  {new Date(l.created_at).toLocaleDateString('es')} · {l.nombre_archivo} ·{' '}
+                  {l.total} cuentas ({l.conocidas} conocidas · {l.desconocidas} pendientes)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => borrarLote(l.id)}
+                  disabled={busy}
+                  className="shrink-0 px-2 py-0.5 rounded hover:bg-[var(--surface-hover)] text-[var(--danger)] disabled:opacity-50"
+                >
+                  Borrar
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
