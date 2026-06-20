@@ -1923,9 +1923,27 @@ function PendientesTab({
   const [mode, setMode] = useState<'view' | 'promover'>('view');
   const [buffer, setBuffer] = useState<EntryBuffer | null>(null);
   const [linkId, setLinkId] = useState('');
+  const [linkQuery, setLinkQuery] = useState('');
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const koLabel = (e: KoEntry) => (e.codigo ? `${e.codigo} · ` : '') + e.error;
+
+  // Resultados del buscador de "Vincular a un KO existente".
+  const linkMatches = useMemo(() => {
+    const q = linkQuery.trim().toLowerCase();
+    if (!q) return [];
+    return entries
+      .filter((e) =>
+        [e.codigo, e.error, e.clasificacion]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(q),
+      )
+      .slice(0, 30);
+  }, [entries, linkQuery]);
 
   // Agrupa las desconocidas por su texto de error, de mayor a menor volumen.
   const grupos = useMemo<GrupoPendiente[]>(() => {
@@ -1958,6 +1976,7 @@ function PendientesTab({
     setMode('view');
     setBuffer(null);
     setLinkId('');
+    setLinkQuery('');
     setError(null);
   }
 
@@ -2096,6 +2115,7 @@ function PendientesTab({
                   setMode('view');
                   setBuffer(null);
                   setLinkId('');
+                  setLinkQuery('');
                   setError(null);
                 }}
                 className="text-left rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 hover:border-[var(--accent)] transition-colors flex items-center justify-between gap-3"
@@ -2186,32 +2206,63 @@ function PendientesTab({
                   </pre>
                 </div>
 
-                {/* Vincular a KO existente */}
+                {/* Vincular a KO existente (buscador) */}
                 <div>
                   <SubLabel>Vincular a un KO existente</SubLabel>
                   <div className="flex flex-col sm:flex-row gap-2">
-                    <select
-                      value={linkId}
-                      onChange={(e) => setLinkId(e.target.value)}
-                      className={`${inputCls} flex-1`}
-                      aria-label="KO al que vincular"
-                    >
-                      <option value="">Elegir KO…</option>
-                      {entries.map((e) => (
-                        <option key={e.id} value={e.id}>
-                          {(e.codigo ? `${e.codigo} · ` : '') + e.error}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        value={linkQuery}
+                        onChange={(e) => {
+                          setLinkQuery(e.target.value);
+                          setLinkId('');
+                        }}
+                        placeholder="Buscar KO por código, error o clasificación…"
+                        className={`${inputCls} w-full`}
+                        aria-label="Buscar KO al que vincular"
+                      />
+                      {!linkId && linkMatches.length > 0 && (
+                        <div className="absolute z-10 mt-1 w-full max-h-60 overflow-y-auto rounded border border-[var(--border)] bg-[var(--bg)] shadow-lg">
+                          {linkMatches.map((e) => (
+                            <button
+                              key={e.id}
+                              type="button"
+                              onClick={() => {
+                                setLinkId(e.id);
+                                setLinkQuery(koLabel(e));
+                              }}
+                              className="block w-full text-left px-2 py-1.5 text-sm hover:bg-[var(--surface-hover)]"
+                            >
+                              <span className="mono text-[11px] text-[var(--muted)] mr-2">
+                                {e.codigo || '—'}
+                              </span>
+                              {e.error}
+                              {e.clasificacion && (
+                                <span className="text-[var(--muted)]"> · {e.clasificacion}</span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {!linkId && linkQuery.trim() && linkMatches.length === 0 && (
+                        <p className="mt-1 text-xs text-[var(--muted)]">Sin KOs que coincidan.</p>
+                      )}
+                    </div>
                     <button
                       type="button"
                       onClick={vincular}
                       disabled={busy || !linkId}
-                      className="text-sm px-3 py-1.5 rounded bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+                      className="shrink-0 text-sm px-3 py-1.5 rounded bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
                     >
                       {busy ? '…' : 'Vincular'}
                     </button>
                   </div>
+                  {linkId && (
+                    <p className="mt-1 text-xs text-[var(--muted)]">
+                      Seleccionado · se vincularán {grupo.casos.length} cuentas.
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-4">
