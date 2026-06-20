@@ -1421,6 +1421,8 @@ function ConocidasTab({
   onOpenSubproceso: (id: string) => void;
 }) {
   const [estadoFilter, setEstadoFilter] = useState<EstadoFilter>('Pendientes');
+  const [clasifFilter, setClasifFilter] = useState('Todas');
+  const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -1436,20 +1438,38 @@ function ConocidasTab({
 
   const totalResueltas = conocidas.filter((c) => c.estado === 'resuelto').length;
 
-  // Agrupa por KO; cada grupo conserva su lista de casos (filtrada por estado).
+  // Clasificaciones presentes entre las conocidas (para el filtro).
+  const clasificaciones = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of conocidas) {
+      const ko = c.ko_entry_id ? entryById.get(c.ko_entry_id) : null;
+      if (ko?.clasificacion) set.add(ko.clasificacion);
+    }
+    return ['Todas', ...[...set].sort()];
+  }, [conocidas, entryById]);
+
+  // Agrupa por KO aplicando estado + clasificación + búsqueda (código/error/clasif).
   const grupos = useMemo(() => {
+    const q = query.trim().toLowerCase();
     const map = new Map<string, { ko: KoEntry | null; casos: KoImportCaso[] }>();
     for (const c of conocidas) {
       if (estadoFilter === 'Pendientes' && c.estado !== 'pendiente') continue;
       if (estadoFilter === 'Resueltos' && c.estado !== 'resuelto') continue;
-      const key = c.ko_entry_id ?? `sin:${c.codigo ?? '—'}`;
-      if (!map.has(key)) {
-        map.set(key, { ko: c.ko_entry_id ? entryById.get(c.ko_entry_id) ?? null : null, casos: [] });
+      const ko = c.ko_entry_id ? entryById.get(c.ko_entry_id) ?? null : null;
+      if (clasifFilter !== 'Todas' && (ko?.clasificacion ?? '') !== clasifFilter) continue;
+      if (q) {
+        const hay = [ko?.codigo, ko?.error, ko?.clasificacion, c.codigo, c.error_texto]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) continue;
       }
+      const key = c.ko_entry_id ?? `sin:${c.codigo ?? '—'}`;
+      if (!map.has(key)) map.set(key, { ko, casos: [] });
       map.get(key)!.casos.push(c);
     }
     return [...map.values()];
-  }, [conocidas, estadoFilter, entryById]);
+  }, [conocidas, estadoFilter, clasifFilter, query, entryById]);
 
   async function setEstado(caso: KoImportCaso, estado: 'pendiente' | 'resuelto') {
     setBusyId(caso.id);
@@ -1506,33 +1526,61 @@ function ConocidasTab({
         </p>
       ) : (
         <>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {ESTADO_FILTERS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setEstadoFilter(s)}
-                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                    estadoFilter === s
-                      ? 'border-[var(--text)] text-[var(--text)] font-medium'
-                      : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]'
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {ESTADO_FILTERS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setEstadoFilter(s)}
+                    className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                      estadoFilter === s
+                        ? 'border-[var(--text)] text-[var(--text)] font-medium'
+                        : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]'
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+              <p className="text-sm text-[var(--muted)]">
+                {totalResueltas}/{conocidas.length} resueltas
+              </p>
             </div>
-            <p className="text-sm text-[var(--muted)]">
-              {totalResueltas}/{conocidas.length} resueltas
-            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Buscar por código, error o clasificación…"
+                className={`${inputCls} sm:flex-1`}
+                aria-label="Buscar en conocidas"
+              />
+              {clasificaciones.length > 1 && (
+                <select
+                  value={clasifFilter}
+                  onChange={(e) => setClasifFilter(e.target.value)}
+                  className={`${inputCls} sm:w-56`}
+                  aria-label="Filtrar por clasificación"
+                >
+                  {clasificaciones.map((c) => (
+                    <option key={c} value={c}>
+                      {c === 'Todas' ? 'Todas las clasificaciones' : c}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
           </div>
 
           {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
 
           {grupos.length === 0 ? (
             <p className="text-sm text-[var(--muted)] py-8 text-center">
-              Nada en «{estadoFilter}».
+              {query.trim() || clasifFilter !== 'Todas'
+                ? 'Sin resultados para el filtro actual.'
+                : `Nada en «${estadoFilter}».`}
             </p>
           ) : (
             <div className="flex flex-col gap-4">
@@ -1787,6 +1835,7 @@ function PendientesTab({
   const [mode, setMode] = useState<'view' | 'promover'>('view');
   const [buffer, setBuffer] = useState<EntryBuffer | null>(null);
   const [linkId, setLinkId] = useState('');
+  const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1802,6 +1851,12 @@ function PendientesTab({
     }
     return [...map.values()].sort((a, b) => b.casos.length - a.casos.length);
   }, [casos]);
+
+  // Grupos visibles según la búsqueda por texto del error.
+  const gruposVisibles = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? grupos.filter((g) => g.label.toLowerCase().includes(q)) : grupos;
+  }, [grupos, query]);
 
   const grupo = useMemo(
     () => grupos.find((g) => g.key === selectedKey) ?? null,
@@ -1925,11 +1980,26 @@ function PendientesTab({
         </p>
       ) : (
         <>
-          <p className="text-sm text-[var(--muted)]">
-            {totalPendientes} cuentas · {grupos.length} errores por normalizar
-          </p>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar por error…"
+              className={`${inputCls} sm:w-80`}
+              aria-label="Buscar en pendientes"
+            />
+            <p className="text-sm text-[var(--muted)] whitespace-nowrap">
+              {totalPendientes} cuentas · {grupos.length} errores por normalizar
+            </p>
+          </div>
+          {gruposVisibles.length === 0 ? (
+            <p className="text-sm text-[var(--muted)] py-8 text-center">
+              Sin resultados para «{query.trim()}».
+            </p>
+          ) : (
           <div className="flex flex-col gap-2">
-            {grupos.map((g) => (
+            {gruposVisibles.map((g) => (
               <button
                 key={g.key}
                 type="button"
@@ -1951,6 +2021,7 @@ function PendientesTab({
               </button>
             ))}
           </div>
+          )}
         </>
       )}
 
