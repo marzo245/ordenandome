@@ -28,7 +28,7 @@
 | **Notas** | Vault de Obsidian (repo de GitHub) con enlaces entre notas y edición asistida por IA. |
 | **Noticias** | Feed agregado por nichos de interés. |
 | **GitHub** | Actividad reciente (commits + PRs) vía Octokit. |
-| **KO** | Base de errores conocidos del flujo Enel (catálogo + subprocesos), con asistente IA. Importa el **Excel de KO altas** (hoja `default_1`): cada fila es una cuenta atascada; cruza su **«Error normalizado»** contra el catálogo por contención (todas las filas con el mismo error reciben el mismo veredicto) → las **conocidas** se agrupan por KO en una worklist con su plan de acción (resuelves en lote o una a una), y las **pendientes** se agrupan por error en una bandeja para normalizarlas y promoverlas a KO (todo el grupo de golpe). Buscador en ambas pestañas y lista de importaciones con borrar. |
+| **KO** | Base de errores conocidos del flujo Enel (catálogo + subprocesos), con asistente IA. Importa el **Excel de KO altas** (ver abajo): triaje de cuentas atascadas en una worklist de **Conocidas** (gestión por cuenta con estado, incidencia e historial) y una bandeja de **Pendientes** por normalizar. |
 | **Sistemas** | Documentación de OPERA, eCO, Salesforce, ForceBeat, Beats y SAP, con las **acciones** de cada uno y el **flujo multi-sistema** (empiezas en un sistema, sacas un dato y saltas al siguiente). El asistente crea/edita sistemas y acciones y acepta capturas de pantalla. |
 | **GUITO** | Mascota Lottie contextual: en cada sección abre el asistente correspondiente. |
 | **Resumen diario** | Generado por IA cada día (vía cron). |
@@ -141,6 +141,27 @@ npm run db:studio    # drizzle studio
 
 ---
 
+## Importación de KO altas
+
+El Excel de "KO altas" lista **cada cuenta atascada** como una fila. Al subirlo (`POST /api/ko/import`, SheetJS server-side):
+
+1. **Hoja:** se lee `default_1` (si no existe, la de más filas; la hoja `Hoja1` suele ser una tabla dinámica de resumen y se ignora).
+2. **Cruce:** se valida **solo por el campo `Error normalizado`**, por contención contra `ko_entries.error` — **sin IA**. Todas las filas con el mismo `Error normalizado` reciben el **mismo veredicto**:
+   - coincidencia única → **conocida** (vinculada a ese KO),
+   - 0 o ambigua (>1) → **desconocida** (pendiente de normalizar).
+   - Lógica en `src/lib/ko-match.ts` (`normKoError`, `buildKoIndex`, `createKoMatcher`), reutilizada por import y por **re-cruzar**.
+3. **Conocidas** (pestaña): worklist agrupada por KO con su plan de acción (clasificación, sistema de solución, subprocesos, resolución). Se resuelven en lote ("marcar N como resueltas") o una a una. Cada cuenta abre un **modal de gestión** con:
+   - **estado interno** `Por gestionar → En revisión → Resuelto` (distinto del tipo conocida/desconocida),
+   - **incidencia** opcional (según el subproceso): `incidencia_numero` + `incidencia_estado` (`pendiente → enviado → ok`),
+   - **notas** e **historial** automático de cambios (bitácora con fecha/hora + apuntes manuales).
+4. **Pendientes** (pestaña): agrupadas por error. Por grupo: **promover** a un KO nuevo (reusa el editor del catálogo) o **vincular** a uno existente (combobox con búsqueda), o **descartar** — todo el grupo de golpe.
+5. **Re-cruzar** (`POST /api/ko/casos/recruzar`): tras crear/editar KOs, reevalúa las pendientes contra el catálogo actual sin re-subir el Excel (el cruce se calcula al importar).
+6. **Importaciones:** cada subida es un lote; se listan con opción de **borrar** (cascada).
+
+Tablas: `ko_import_lotes` (un lote por subida) y `ko_import_casos` (un caso por fila: `fila` jsonb cruda, `error_texto`, `tipo`, `estado`, `incidencia_*`, `historial` jsonb).
+
+---
+
 ## Endpoints (principales)
 
 | Método | Ruta | Acción |
@@ -148,7 +169,9 @@ npm run db:studio    # drizzle studio
 | `GET` `POST` | `/api/tasks` · `/api/tasks/[id]` | tareas |
 | `GET` `POST` `PATCH` `DELETE` | `/api/ko` · `/api/ko/subprocesos` | base KO |
 | `POST` | `/api/ko/import` | importar Excel de KO altas (hoja `default_1`, cruce por «Error normalizado») |
-| `GET` `PATCH` `DELETE` `POST` | `/api/ko/casos` · `/api/ko/casos/[id]` · `/api/ko/casos/promover` · `/api/ko/casos/bulk` · `/api/ko/lotes` · `/api/ko/lotes/[id]` | casos importados (worklist + bandeja, acciones en lote) |
+| `GET` `PATCH` `DELETE` | `/api/ko/casos` · `/api/ko/casos/[id]` | casos importados (listar / gestionar uno: estado, incidencia, notas, historial) |
+| `POST` | `/api/ko/casos/promover` · `/api/ko/casos/bulk` · `/api/ko/casos/recruzar` | promover/vincular grupo · acciones en lote (resolver/reabrir/descartar) · re-cruzar pendientes |
+| `GET` `DELETE` | `/api/ko/lotes` · `/api/ko/lotes/[id]` | lotes de importación (listar / borrar en cascada) |
 | `GET` `POST` `PATCH` `DELETE` | `/api/sistemas` · `/api/sistemas/secciones` | sistemas y acciones |
 | `POST` | `/api/ko/ai` · `/api/sistemas/ai` · `/api/ai` | asistentes IA |
 | `GET` | `/api/github/sync?days=N` | sincronizar GitHub |
