@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import { db, ko_entries, ko_import_lotes, ko_import_casos } from '@/db';
 import type { NewKoImportCaso } from '@/db';
+import { buildKoIndex, createKoMatcher } from '@/lib/ko-match';
 
 export const maxDuration = 60;
 
@@ -29,15 +30,6 @@ function normHeader(s: string): string {
     .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/[\s._-]+/g, '')
-    .trim();
-}
-
-/** Normaliza un texto de error para el cruce por contención (conserva letras y dígitos). */
-function normError(s: unknown): string {
-  return String(s ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9áéíóúñü]+/gi, ' ')
-    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -108,25 +100,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ needsColumn: true, columnas: headers });
     }
 
-    // Catálogo para el cruce por contención. Solo errores con suficiente longitud
-    // (evita que frases muy cortas generen falsos positivos).
+    // Cruce por contención cacheado por "Error normalizado" (mismo texto → mismo veredicto).
     const catalogo = await db.select().from(ko_entries);
-    const indice = catalogo
-      .map((ko) => ({ id: ko.id, codigo: ko.codigo, n: normError(ko.error) }))
-      .filter((k) => k.n.length >= 8);
-
-    // El cruce se cachea por "Error normalizado": todas las filas con el mismo
-    // texto reciben EXACTAMENTE el mismo veredicto.
-    const cache = new Map<string, (typeof indice)[number] | null>();
-    const matchUnico = (texto: string | null): (typeof indice)[number] | null => {
-      const t = normError(texto);
-      if (!t) return null;
-      if (cache.has(t)) return cache.get(t)!;
-      const hits = indice.filter((k) => t.includes(k.n));
-      const ko = hits.length === 1 ? hits[0] : null; // 0 o ambiguo (>1) → pendiente
-      cache.set(t, ko);
-      return ko;
-    };
+    const matchUnico = createKoMatcher(buildKoIndex(catalogo));
 
     let conocidas = 0;
     const casosPre = filas.map((fila) => {

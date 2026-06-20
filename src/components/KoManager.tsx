@@ -1305,6 +1305,27 @@ function ImportarExcel({ onImported }: { onImported: () => void }) {
     refrescarLotes();
   }, [refrescarLotes]);
 
+  async function recruzar() {
+    setBusy(true);
+    setError(null);
+    setResumen(null);
+    try {
+      const res = await fetch('/api/ko/casos/recruzar', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `No se pudo re-cruzar (${res.status})`);
+      setResumen(
+        data.movidas > 0
+          ? `${data.movidas} cuentas pasaron a Conocidas`
+          : 'No hay pendientes que crucen con el catálogo actual',
+      );
+      onImported();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al re-cruzar');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function borrarLote(id: string) {
     if (!confirm('¿Borrar esta importación y todas sus cuentas?')) return;
     setBusy(true);
@@ -1382,6 +1403,15 @@ function ImportarExcel({ onImported }: { onImported: () => void }) {
           className="hidden"
           aria-label="Subir Excel de KO altas"
         />
+        <button
+          type="button"
+          onClick={recruzar}
+          disabled={busy}
+          title="Reevalúa las pendientes contra el catálogo actual (tras crear o editar KOs)"
+          className="text-sm px-3 py-1.5 rounded border border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
+        >
+          Re-cruzar pendientes
+        </button>
         <p className="text-xs text-[var(--muted)]">
           Lee la hoja <span className="mono">default_1</span>. Cruza el «Error normalizado»
           contra el catálogo (por contención).
