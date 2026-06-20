@@ -1291,14 +1291,14 @@ function ImportarExcel({ onImported }: { onImported: () => void }) {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  async function subir(file: File, columnaCodigo?: string) {
+  async function subir(file: File, columnaError?: string) {
     setBusy(true);
     setError(null);
     setResumen(null);
     try {
       const fd = new FormData();
       fd.append('file', file);
-      if (columnaCodigo) fd.append('columna_codigo', columnaCodigo);
+      if (columnaError) fd.append('columna_error', columnaError);
       const res = await fetch('/api/ko/import', { method: 'POST', body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || `Falló la subida (${res.status})`);
@@ -1313,8 +1313,9 @@ function ImportarExcel({ onImported }: { onImported: () => void }) {
       setColumnas(null);
       setPendingFile(null);
       const lote = data.lote as { conocidas: number; desconocidas: number; total: number };
+      const hoja = typeof data.hoja === 'string' ? ` · hoja «${data.hoja}»` : '';
       setResumen(
-        `${lote.total} filas · ${lote.conocidas} conocidas · ${lote.desconocidas} pendientes`,
+        `${lote.total} cuentas${hoja} · ${lote.conocidas} conocidas · ${lote.desconocidas} pendientes`,
       );
       onImported();
     } catch (e) {
@@ -1351,14 +1352,15 @@ function ImportarExcel({ onImported }: { onImported: () => void }) {
           aria-label="Subir Excel de KO altas"
         />
         <p className="text-xs text-[var(--muted)]">
-          Solo se lee la hoja 1. Cruza por código contra el catálogo.
+          Lee la hoja <span className="mono">default_1</span>. Cruza el «Error normalizado»
+          contra el catálogo (por contención).
         </p>
       </div>
 
       {columnas && (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           <span className="text-[var(--muted)]">
-            No detecté la columna de código. ¿Cuál es?
+            No detecté la columna del error. ¿Cuál es?
           </span>
           <select
             disabled={busy}
@@ -1367,7 +1369,7 @@ function ImportarExcel({ onImported }: { onImported: () => void }) {
               if (e.target.value && pendingFile) subir(pendingFile, e.target.value);
             }}
             className={`${inputCls} sm:w-56`}
-            aria-label="Columna de código"
+            aria-label="Columna del error"
           >
             <option value="" disabled>
               Elegir columna…
@@ -1468,6 +1470,32 @@ function ConocidasTab({
     }
   }
 
+  // Resuelve/reabre todas las cuentas de un grupo de una vez.
+  async function setEstadoBulk(ids: string[], estado: 'pendiente' | 'resuelto') {
+    if (ids.length === 0) return;
+    setBusyId(ids[0]);
+    setError(null);
+    try {
+      const res = await fetch('/api/ko/casos/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: estado === 'resuelto' ? 'resolver' : 'reabrir', ids }),
+      });
+      if (!res.ok) throw new Error(`No se pudo actualizar (${res.status})`);
+      const idSet = new Set(ids);
+      const stamp = estado === 'resuelto' ? new Date() : null;
+      setCasos((prev) =>
+        prev.map((c) =>
+          idSet.has(c.id) ? { ...c, estado, resolved_at: stamp } : c,
+        ),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al actualizar');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <ImportarExcel onImported={onImported} />
@@ -1514,9 +1542,10 @@ function ConocidasTab({
                   ko={g.ko}
                   casos={g.casos}
                   subprocesos={subprocesos}
-                  busyId={busyId}
+                  busy={busyId != null}
                   onResolver={(c) => setEstado(c, 'resuelto')}
                   onReabrir={(c) => setEstado(c, 'pendiente')}
+                  onResolverGrupo={(ids) => setEstadoBulk(ids, 'resuelto')}
                   onOpenSubproceso={onOpenSubproceso}
                 />
               ))}
@@ -1528,34 +1557,44 @@ function ConocidasTab({
   );
 }
 
-/** Tarjeta de un KO con su plan de acción y la lista de casos a gestionar. */
+/** Tarjeta de un KO con su plan de acción y las cuentas afectadas a gestionar. */
 function GrupoConocidas({
   ko,
   casos,
   subprocesos,
-  busyId,
+  busy,
   onResolver,
   onReabrir,
+  onResolverGrupo,
   onOpenSubproceso,
 }: {
   ko: KoEntry | null;
   casos: KoImportCaso[];
   subprocesos: KoSubproceso[];
-  busyId: string | null;
+  busy: boolean;
   onResolver: (c: KoImportCaso) => void;
   onReabrir: (c: KoImportCaso) => void;
+  onResolverGrupo: (ids: string[]) => void;
   onOpenSubproceso: (id: string) => void;
 }) {
+  const [abierto, setAbierto] = useState(false);
   const subs = ko?.subprocesos ?? [];
+  const pendientes = casos.filter((c) => c.estado === 'pendiente');
+
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-4 flex flex-col gap-4">
-      <div className="min-w-0">
-        <div className="mono text-[11px] text-[var(--muted)] font-medium mb-1">
-          {ko?.codigo || casos[0]?.codigo || 'sin código'}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="mono text-[11px] text-[var(--muted)] font-medium mb-1">
+            {ko?.codigo || casos[0]?.codigo || 'sin código'}
+          </div>
+          <h3 className="text-lg font-semibold tracking-tight">
+            {ko?.error ?? casos[0]?.error_texto ?? 'KO no encontrado en el catálogo'}
+          </h3>
         </div>
-        <h3 className="text-lg font-semibold tracking-tight">
-          {ko?.error ?? 'KO no encontrado en el catálogo'}
-        </h3>
+        <span className="shrink-0 text-xs text-[var(--muted)] whitespace-nowrap">
+          {casos.length - pendientes.length}/{casos.length} cuentas
+        </span>
       </div>
 
       {/* Plan de acción del KO */}
@@ -1597,46 +1636,68 @@ function GrupoConocidas({
         </div>
       )}
 
-      {/* Casos a gestionar */}
-      <div className="flex flex-col divide-y divide-[var(--border)]">
-        {casos.map((c) => {
-          const resuelto = c.estado === 'resuelto';
-          const busy = busyId === c.id;
-          return (
-            <div
-              key={c.id}
-              className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0"
-            >
-              <p
-                className={`text-sm min-w-0 break-words ${
-                  resuelto ? 'text-[var(--muted)] line-through' : 'text-[var(--text)]'
-                }`}
-              >
-                {filaResumen(c.fila) || c.codigo || '—'}
-              </p>
-              {resuelto ? (
-                <button
-                  type="button"
-                  onClick={() => onReabrir(c)}
-                  disabled={busy}
-                  className="shrink-0 text-xs px-2.5 py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)] disabled:opacity-50"
-                >
-                  {busy ? '…' : 'Reabrir'}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onResolver(c)}
-                  disabled={busy}
-                  className="shrink-0 text-xs px-2.5 py-1 rounded border border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
-                >
-                  {busy ? '…' : 'Resuelto ✓'}
-                </button>
-              )}
-            </div>
-          );
-        })}
+      {/* Acciones de grupo */}
+      <div className="flex flex-wrap items-center gap-2">
+        {pendientes.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onResolverGrupo(pendientes.map((c) => c.id))}
+            disabled={busy}
+            className="text-xs px-3 py-1.5 rounded bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+          >
+            Marcar {pendientes.length} como resueltas
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setAbierto((v) => !v)}
+          className="text-xs px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)]"
+        >
+          {abierto ? 'Ocultar cuentas' : `Ver cuentas (${casos.length})`}
+        </button>
       </div>
+
+      {/* Cuentas individuales (una a una) */}
+      {abierto && (
+        <div className="flex flex-col divide-y divide-[var(--border)]">
+          {casos.map((c) => {
+            const resuelto = c.estado === 'resuelto';
+            return (
+              <div
+                key={c.id}
+                className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0"
+              >
+                <p
+                  className={`text-sm min-w-0 break-words ${
+                    resuelto ? 'text-[var(--muted)] line-through' : 'text-[var(--text)]'
+                  }`}
+                >
+                  {filaResumen(c.fila) || c.codigo || '—'}
+                </p>
+                {resuelto ? (
+                  <button
+                    type="button"
+                    onClick={() => onReabrir(c)}
+                    disabled={busy}
+                    className="shrink-0 text-xs px-2.5 py-1 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)] disabled:opacity-50"
+                  >
+                    Reabrir
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onResolver(c)}
+                    disabled={busy}
+                    className="shrink-0 text-xs px-2.5 py-1 rounded border border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
+                  >
+                    Resuelto ✓
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1645,15 +1706,22 @@ function GrupoConocidas({
 /* Tab 4 — Pendientes (casos por gestionar / normalizar)              */
 /* ================================================================== */
 
-/** Construye un buffer de KO a partir de un caso pendiente (para promoverlo). */
+/** Valor de la columna de ECO Notes (mensaje crudo) si existe en la fila. */
+function ecoNotesDeFila(fila: KoImportCaso['fila']): string {
+  const entry = filaEntries(fila).find(([k]) => /eco.*notes/i.test(k));
+  return entry ? entry[1] : '';
+}
+
+/**
+ * Construye un buffer de KO a partir de un caso pendiente (para promoverlo).
+ * Prerellena el error con su «Error normalizado» y las ECO Notes con el mensaje
+ * crudo; el resto lo completa el usuario al normalizar.
+ */
 function casoToBuffer(caso: KoImportCaso): EntryBuffer {
-  const ecoNotes = filaEntries(caso.fila)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join('\n');
   return {
-    codigo: caso.codigo ?? '',
-    error: '',
-    eco_notes: ecoNotes,
+    codigo: '',
+    error: caso.error_texto ?? '',
+    eco_notes: ecoNotesDeFila(caso.fila),
     sistema: '',
     flujo: '',
     clasificacion: '',
@@ -1690,10 +1758,17 @@ function bufferToKoData(b: EntryBuffer) {
   };
 }
 
+type GrupoPendiente = {
+  key: string;
+  label: string;
+  casos: KoImportCaso[];
+};
+
 /**
- * Bandeja de casos cuyo código NO está en el catálogo: están pendientes de
- * gestionar. Desde aquí se pueden vincular a un KO existente o promover a un KO
- * nuevo (normalizándolos con su categoría y subproceso), o descartar.
+ * Bandeja de cuentas cuyo error NO está en el catálogo: pendientes de normalizar.
+ * Agrupa por «Error normalizado» (muchas cuentas comparten el mismo error) y, por
+ * grupo, permite vincular a un KO existente, promover a un KO nuevo o descartar
+ * TODAS las cuentas del grupo de una vez.
  */
 function PendientesTab({
   entries,
@@ -1708,46 +1783,73 @@ function PendientesTab({
   onImported: () => void;
   onChanged: () => void;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [mode, setMode] = useState<'view' | 'promover'>('view');
   const [buffer, setBuffer] = useState<EntryBuffer | null>(null);
   const [linkId, setLinkId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const pendientes = useMemo(
-    () => casos.filter((c) => c.tipo === 'desconocida'),
-    [casos],
-  );
-  const selected = useMemo(
-    () => pendientes.find((c) => c.id === selectedId) ?? null,
-    [pendientes, selectedId],
+  // Agrupa las desconocidas por su texto de error, de mayor a menor volumen.
+  const grupos = useMemo<GrupoPendiente[]>(() => {
+    const map = new Map<string, GrupoPendiente>();
+    for (const c of casos) {
+      if (c.tipo !== 'desconocida') continue;
+      const label = c.error_texto?.trim() || '(sin error normalizado)';
+      const key = label.toLowerCase();
+      if (!map.has(key)) map.set(key, { key, label, casos: [] });
+      map.get(key)!.casos.push(c);
+    }
+    return [...map.values()].sort((a, b) => b.casos.length - a.casos.length);
+  }, [casos]);
+
+  const grupo = useMemo(
+    () => grupos.find((g) => g.key === selectedKey) ?? null,
+    [grupos, selectedKey],
   );
 
+  const totalPendientes = grupos.reduce((n, g) => n + g.casos.length, 0);
+
   function close() {
-    setSelectedId(null);
+    setSelectedKey(null);
     setMode('view');
     setBuffer(null);
     setLinkId('');
     setError(null);
   }
 
+  /** Marca localmente las cuentas del grupo como conocidas (tras link/create). */
+  function aplicarVinculo(ids: string[], ko: KoEntry) {
+    const idSet = new Set(ids);
+    setCasos((prev) =>
+      prev.map((c) =>
+        idSet.has(c.id)
+          ? { ...c, tipo: 'conocida', ko_entry_id: ko.id, codigo: ko.codigo }
+          : c,
+      ),
+    );
+  }
+
   async function vincular() {
-    if (!selected || !linkId) return;
+    if (!grupo || !linkId) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/ko/casos/${selected.id}/promover`, {
+      const res = await fetch('/api/ko/casos/promover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'link', ko_entry_id: linkId }),
+        body: JSON.stringify({
+          mode: 'link',
+          ko_entry_id: linkId,
+          caso_ids: grupo.casos.map((c) => c.id),
+        }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => null);
         throw new Error(d?.error || `No se pudo vincular (${res.status})`);
       }
-      const { caso } = (await res.json()) as { caso: KoImportCaso };
-      setCasos((prev) => prev.map((c) => (c.id === caso.id ? caso : c)));
+      const { koEntry } = (await res.json()) as { koEntry: KoEntry };
+      aplicarVinculo(grupo.casos.map((c) => c.id), koEntry);
       close();
       onChanged();
     } catch (e) {
@@ -1758,7 +1860,7 @@ function PendientesTab({
   }
 
   async function promover() {
-    if (!selected || !buffer) return;
+    if (!grupo || !buffer) return;
     if (!buffer.error.trim()) {
       setError('El error es obligatorio para crear el KO.');
       return;
@@ -1766,17 +1868,21 @@ function PendientesTab({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/ko/casos/${selected.id}/promover`, {
+      const res = await fetch('/api/ko/casos/promover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'create', koData: bufferToKoData(buffer) }),
+        body: JSON.stringify({
+          mode: 'create',
+          koData: bufferToKoData(buffer),
+          caso_ids: grupo.casos.map((c) => c.id),
+        }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => null);
         throw new Error(d?.error || `No se pudo promover (${res.status})`);
       }
-      const { caso } = (await res.json()) as { caso: KoImportCaso };
-      setCasos((prev) => prev.map((c) => (c.id === caso.id ? caso : c)));
+      const { koEntry } = (await res.json()) as { koEntry: KoEntry };
+      aplicarVinculo(grupo.casos.map((c) => c.id), koEntry);
       close();
       onChanged();
     } catch (e) {
@@ -1787,15 +1893,20 @@ function PendientesTab({
   }
 
   async function descartar() {
-    if (!selected) return;
-    if (!confirm('¿Descartar este caso pendiente?')) return;
+    if (!grupo) return;
+    if (!confirm(`¿Descartar las ${grupo.casos.length} cuentas de este error?`)) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/ko/casos/${selected.id}`, { method: 'DELETE' });
+      const ids = grupo.casos.map((c) => c.id);
+      const res = await fetch('/api/ko/casos/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'descartar', ids }),
+      });
       if (!res.ok) throw new Error(`No se pudo descartar (${res.status})`);
-      const removedId = selected.id;
-      setCasos((prev) => prev.filter((c) => c.id !== removedId));
+      const idSet = new Set(ids);
+      setCasos((prev) => prev.filter((c) => !idSet.has(c.id)));
       close();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al descartar');
@@ -1808,47 +1919,43 @@ function PendientesTab({
     <div className="flex flex-col gap-4">
       <ImportarExcel onImported={onImported} />
 
-      {pendientes.length === 0 ? (
+      {grupos.length === 0 ? (
         <p className="text-sm text-[var(--muted)] py-8 text-center">
-          No hay casos pendientes. Los errores sin código en el catálogo aparecerán aquí.
+          No hay cuentas pendientes. Los errores que no cruzan con el catálogo aparecerán aquí.
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wider text-[var(--muted)]">
-                <th className="font-medium pb-2 pr-3">Código</th>
-                <th className="font-medium pb-2">Caso</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pendientes.map((c) => (
-                <tr
-                  key={c.id}
-                  onClick={() => {
-                    setSelectedId(c.id);
-                    setMode('view');
-                    setBuffer(null);
-                    setLinkId('');
-                    setError(null);
-                  }}
-                  className="border-b border-[var(--border)] cursor-pointer hover:bg-[var(--surface-hover)]"
-                >
-                  <td className="py-2 pr-3 mono font-medium whitespace-nowrap">
-                    {c.codigo || <span className="text-[var(--muted)] font-normal">—</span>}
-                  </td>
-                  <td className="py-2 max-w-[32rem] truncate text-[var(--muted)]">
-                    {filaResumen(c.fila) || '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <p className="text-sm text-[var(--muted)]">
+            {totalPendientes} cuentas · {grupos.length} errores por normalizar
+          </p>
+          <div className="flex flex-col gap-2">
+            {grupos.map((g) => (
+              <button
+                key={g.key}
+                type="button"
+                onClick={() => {
+                  setSelectedKey(g.key);
+                  setMode('view');
+                  setBuffer(null);
+                  setLinkId('');
+                  setError(null);
+                }}
+                className="text-left rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 hover:border-[var(--accent)] transition-colors flex items-center justify-between gap-3"
+              >
+                <span className="text-sm min-w-0 break-words text-[var(--text)]">
+                  {g.label}
+                </span>
+                <span className="shrink-0 text-xs text-[var(--muted)] whitespace-nowrap">
+                  {g.casos.length} cuenta{g.casos.length === 1 ? '' : 's'} ↗
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
       )}
 
-      {/* Detalle / acciones */}
-      {selected && (
+      {/* Detalle / acciones del grupo */}
+      {grupo && (
         <div
           className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto"
           onClick={close}
@@ -1877,7 +1984,7 @@ function PendientesTab({
                 </div>
                 <p className="text-xs text-[var(--muted)]">
                   Normaliza el error y asígnale clasificación y subproceso. Al guardar se
-                  crea el KO y el caso queda vinculado.
+                  crea el KO y se vinculan las <strong>{grupo.casos.length} cuentas</strong> del grupo.
                 </p>
                 <EntryEditor
                   buffer={buffer}
@@ -1896,23 +2003,25 @@ function PendientesTab({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="mono text-[11px] text-[var(--muted)] font-medium mb-1">
-                      {selected.codigo || 'sin código'}
+                      {grupo.casos.length} cuenta{grupo.casos.length === 1 ? '' : 's'}
                     </div>
-                    <h2 className="text-xl font-bold tracking-tight">Caso pendiente</h2>
+                    <h2 className="text-xl font-bold tracking-tight break-words">
+                      {grupo.label}
+                    </h2>
                   </div>
                   <button
                     type="button"
                     onClick={close}
-                    className="text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)]"
+                    className="shrink-0 text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)]"
                   >
                     Cerrar
                   </button>
                 </div>
 
                 <div>
-                  <SubLabel>Fila del Excel</SubLabel>
+                  <SubLabel>Ejemplo de cuenta (fila del Excel)</SubLabel>
                   <pre className="text-xs mono whitespace-pre-wrap bg-[var(--surface)] border border-[var(--border)] rounded p-3 text-[var(--text)] overflow-x-auto">
-                    {filaEntries(selected.fila)
+                    {filaEntries(grupo.casos[0].fila)
                       .map(([k, v]) => `${k}: ${v}`)
                       .join('\n') || '—'}
                   </pre>
@@ -1950,7 +2059,7 @@ function PendientesTab({
                   <button
                     type="button"
                     onClick={() => {
-                      setBuffer(casoToBuffer(selected));
+                      setBuffer(casoToBuffer(grupo.casos[0]));
                       setMode('promover');
                       setError(null);
                     }}
@@ -1965,7 +2074,7 @@ function PendientesTab({
                     disabled={busy}
                     className="text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--danger)] disabled:opacity-50 ml-auto"
                   >
-                    Descartar
+                    Descartar grupo
                   </button>
                 </div>
               </div>

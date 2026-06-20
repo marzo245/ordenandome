@@ -28,7 +28,7 @@
 | **Notas** | Vault de Obsidian (repo de GitHub) con enlaces entre notas y edición asistida por IA. |
 | **Noticias** | Feed agregado por nichos de interés. |
 | **GitHub** | Actividad reciente (commits + PRs) vía Octokit. |
-| **KO** | Base de errores conocidos del flujo Enel (catálogo + subprocesos), con asistente IA. Importa el **Excel de KO altas** (hoja 1): cruza cada fila por código contra el catálogo → las **conocidas** van a una worklist con su plan de acción (categoría + subproceso) para gestionarlas una a una, y las **pendientes** (sin código en el catálogo) quedan en una bandeja para normalizarlas. |
+| **KO** | Base de errores conocidos del flujo Enel (catálogo + subprocesos), con asistente IA. Importa el **Excel de KO altas** (hoja `default_1`): cada fila es una cuenta atascada; cruza su «Error normalizado» contra el catálogo por contención → las **conocidas** se agrupan por KO en una worklist con su plan de acción (resuelves en lote o una a una), y las **pendientes** se agrupan por error en una bandeja para normalizarlas y promoverlas a KO (todo el grupo de golpe). |
 | **Sistemas** | Documentación de OPERA, eCO, Salesforce, ForceBeat, Beats y SAP, con las **acciones** de cada uno y el **flujo multi-sistema** (empiezas en un sistema, sacas un dato y saltas al siguiente). El asistente crea/edita sistemas y acciones y acepta capturas de pantalla. |
 | **GUITO** | Mascota Lottie contextual: en cada sección abre el asistente correspondiente. |
 | **Resumen diario** | Generado por IA cada día (vía cron). |
@@ -147,8 +147,8 @@ npm run db:studio    # drizzle studio
 |---|---|---|
 | `GET` `POST` | `/api/tasks` · `/api/tasks/[id]` | tareas |
 | `GET` `POST` `PATCH` `DELETE` | `/api/ko` · `/api/ko/subprocesos` | base KO |
-| `POST` | `/api/ko/import` | importar Excel de KO altas (hoja 1, cruce por código) |
-| `GET` `PATCH` `DELETE` | `/api/ko/casos` · `/api/ko/casos/[id]` · `/api/ko/casos/[id]/promover` · `/api/ko/lotes/[id]` | casos importados (worklist + bandeja de pendientes) |
+| `POST` | `/api/ko/import` | importar Excel de KO altas (hoja `default_1`, cruce por contención del error) |
+| `GET` `PATCH` `DELETE` `POST` | `/api/ko/casos` · `/api/ko/casos/[id]` · `/api/ko/casos/promover` · `/api/ko/casos/bulk` · `/api/ko/lotes/[id]` | casos importados (worklist + bandeja, acciones en lote) |
 | `GET` `POST` `PATCH` `DELETE` | `/api/sistemas` · `/api/sistemas/secciones` | sistemas y acciones |
 | `POST` | `/api/ko/ai` · `/api/sistemas/ai` · `/api/ai` | asistentes IA |
 | `GET` | `/api/github/sync?days=N` | sincronizar GitHub |

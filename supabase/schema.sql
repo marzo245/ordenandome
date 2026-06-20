@@ -69,6 +69,7 @@ create table if not exists ko_import_casos (
   id          uuid primary key default gen_random_uuid(),
   lote_id     uuid not null references ko_import_lotes(id) on delete cascade,
   fila        jsonb not null default '{}'::jsonb,
+  error_texto text,
   codigo      text,
   tipo        text not null check (tipo in ('conocida','desconocida')),
   ko_entry_id uuid references ko_entries(id) on delete set null,
@@ -78,8 +79,10 @@ create table if not exists ko_import_casos (
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
+alter table ko_import_casos add column if not exists error_texto text;
 
 create index if not exists idx_ko_casos_lote on ko_import_casos(lote_id);
 create index if not exists idx_ko_casos_tipo_estado on ko_import_casos(tipo, estado);
 create index if not exists idx_ko_casos_codigo on ko_import_casos(codigo);
 create index if not exists idx_ko_casos_ko on ko_import_casos(ko_entry_id);
+create index if not exists idx_ko_casos_error on ko_import_casos(error_texto);

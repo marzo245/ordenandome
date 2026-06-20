@@ -274,7 +274,8 @@ export const ko_import_casos = pgTable(
       .$type<Record<string, string | number | null>>()
       .notNull()
       .default(sql`'{}'::jsonb`),          // fila cruda del Excel
-    codigo: text(),                        // código detectado (puede ser null)
+    error_texto: text(),                   // valor de la columna de error usada para cruzar
+    codigo: text(),                        // código del KO que cruzó (null si pendiente)
     tipo: text({ enum: ['conocida', 'desconocida'] }).notNull(),
     ko_entry_id: uuid().references(() => ko_entries.id, { onDelete: 'set null' }),
     estado: text({ enum: ['pendiente', 'resuelto'] }).notNull().default('pendiente'),
@@ -288,6 +289,7 @@ export const ko_import_casos = pgTable(
     index('idx_ko_casos_tipo_estado').on(t.tipo, t.estado),
     index('idx_ko_casos_codigo').on(t.codigo),
     index('idx_ko_casos_ko').on(t.ko_entry_id),
+    index('idx_ko_casos_error').on(t.error_texto),
   ]
 );
 

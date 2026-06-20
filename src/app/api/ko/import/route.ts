@@ -1,13 +1,16 @@
 /**
  * Importación del Excel de "KO altas".
- * - POST /api/ko/import → recibe un .xlsx (multipart, campo `file`), lee SOLO la
- *   hoja 1, detecta la columna de código y cruza cada fila POR CÓDIGO EXACTO
- *   contra el catálogo (`ko_entries.codigo`). Persiste un lote + sus casos.
+ * - POST /api/ko/import → recibe un .xlsx (multipart, campo `file`), lee la hoja
+ *   de datos (`default_1` o, si no existe, la de más filas) y cruza cada fila
+ *   contra el catálogo POR CONTENCIÓN del error: una cuenta es "conocida" si la
+ *   frase de UN KO del catálogo (`ko_entries.error`) está contenida en su
+ *   "Error normalizado". Si no cruza con ninguno, o cruza con varios (ambiguo),
+ *   queda como "desconocida" (pendiente de normalizar). Sin IA.
  *
  * Respuestas:
- * - 201 `{ lote, casos }` cuando se importa.
- * - 200 `{ needsColumn: true, columnas }` si no se pudo detectar la columna de
- *   código sin ambigüedad: el cliente reenvía con `columna_codigo`.
+ * - 201 `{ lote }` cuando se importa (los casos se recargan desde el server).
+ * - 200 `{ needsColumn: true, columnas }` si no se pudo detectar la columna del
+ *   error: el cliente reenvía con `columna_error`.
  * - 4xx/5xx con `{ error }`.
  */
 import { NextRequest, NextResponse } from 'next/server';
@@ -19,8 +22,8 @@ export const maxDuration = 60;
 
 type Fila = Record<string, string | number | null>;
 
-/** Normaliza una cabecera/código para comparar: minúsculas, sin acentos ni separadores. */
-function norm(s: string): string {
+/** Normaliza una cabecera para comparar: minúsculas, sin acentos ni separadores. */
+function normHeader(s: string): string {
   return s
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
@@ -29,27 +32,51 @@ function norm(s: string): string {
     .trim();
 }
 
-/** Normaliza un código para el cruce (tolerante a may/min y espacios, conserva guiones). */
-function normCodigo(s: unknown): string {
-  return String(s ?? '').trim().toLowerCase();
+/** Normaliza un texto de error para el cruce por contención (conserva letras y dígitos). */
+function normError(s: unknown): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9áéíóúñü]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-// Cabeceras candidatas a "columna de código" (ya normalizadas con norm()).
-const CANDIDATAS_CODIGO = ['codigo', 'cod', 'coderror', 'codigoerror', 'codigoko', 'codko', 'ko'];
+// Cabeceras candidatas a "columna de error" (ya normalizadas con normHeader()).
+const CANDIDATAS_ERROR = ['errornormalizado', 'errornorm', 'error'];
 
-/** Elige qué columna del Excel contiene el código. Devuelve null si es ambiguo. */
-function detectarColumnaCodigo(headers: string[], pedida: string | null): string | null {
+/** Elige qué hoja contiene los datos: `default_1` si existe, si no la de más filas. */
+function elegirHoja(wb: XLSX.WorkBook): string {
+  const porNombre = wb.SheetNames.find((n) => normHeader(n) === 'default1');
+  if (porNombre) return porNombre;
+  let mejor = wb.SheetNames[0];
+  let max = -1;
+  for (const n of wb.SheetNames) {
+    const rango = wb.Sheets[n]['!ref'];
+    const filas = rango ? XLSX.utils.decode_range(rango).e.r : 0;
+    if (filas > max) {
+      max = filas;
+      mejor = n;
+    }
+  }
+  return mejor;
+}
+
+/** Elige la columna del error. Devuelve null si es ambiguo o no se encuentra. */
+function detectarColumnaError(headers: string[], pedida: string | null): string | null {
   if (pedida && headers.includes(pedida)) return pedida;
-  const matches = headers.filter((h) => CANDIDATAS_CODIGO.includes(norm(h)));
-  // Solo auto-detectamos si hay exactamente una candidata clara.
-  return matches.length === 1 ? matches[0] : null;
+  // Probamos las candidatas en orden de preferencia.
+  for (const cand of CANDIDATAS_ERROR) {
+    const matches = headers.filter((h) => normHeader(h) === cand);
+    if (matches.length === 1) return matches[0];
+  }
+  return null;
 }
 
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
     const file = form.get('file');
-    const columnaPedida = form.get('columna_codigo');
+    const columnaPedida = form.get('columna_error');
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: 'file requerido (multipart)' }, { status: 400 });
@@ -65,46 +92,54 @@ export async function POST(req: NextRequest) {
     } catch {
       return NextResponse.json({ error: 'No se pudo leer el archivo como Excel' }, { status: 422 });
     }
-
-    const primeraHoja = wb.SheetNames[0];
-    if (!primeraHoja) {
+    if (wb.SheetNames.length === 0) {
       return NextResponse.json({ error: 'El Excel no tiene hojas' }, { status: 422 });
     }
-    const ws = wb.Sheets[primeraHoja];
-    const filas = XLSX.utils.sheet_to_json<Fila>(ws, { defval: null, raw: false });
 
+    const hoja = elegirHoja(wb);
+    const filas = XLSX.utils.sheet_to_json<Fila>(wb.Sheets[hoja], { defval: null, raw: false });
     if (filas.length === 0) {
-      return NextResponse.json({ error: 'La hoja 1 está vacía o sin cabeceras' }, { status: 422 });
+      return NextResponse.json({ error: `La hoja "${hoja}" está vacía o sin cabeceras` }, { status: 422 });
     }
 
     const headers = Object.keys(filas[0]);
-    const columnaCodigo = detectarColumnaCodigo(
+    const columnaError = detectarColumnaError(
       headers,
       typeof columnaPedida === 'string' ? columnaPedida : null
     );
-    if (!columnaCodigo) {
+    if (!columnaError) {
       // No pudimos decidir la columna: que el usuario la elija y reintente.
       return NextResponse.json({ needsColumn: true, columnas: headers });
     }
 
-    // Mapa de cruce por código exacto (los KO sin código no entran).
+    // Catálogo para el cruce por contención. Solo errores con suficiente longitud
+    // (evita que frases muy cortas generen falsos positivos).
     const catalogo = await db.select().from(ko_entries);
-    const porCodigo = new Map<string, string>();
-    for (const ko of catalogo) {
-      if (ko.codigo) porCodigo.set(normCodigo(ko.codigo), ko.id);
-    }
+    const indice = catalogo
+      .map((ko) => ({ id: ko.id, codigo: ko.codigo, n: normError(ko.error) }))
+      .filter((k) => k.n.length >= 8);
 
     let conocidas = 0;
     const casosPre = filas.map((fila) => {
-      const codigoRaw = fila[columnaCodigo];
-      const codigo = codigoRaw == null || codigoRaw === '' ? null : String(codigoRaw).trim();
-      const koId = codigo ? porCodigo.get(normCodigo(codigo)) ?? null : null;
-      if (koId) conocidas++;
-      return { fila, codigo, koId };
+      const errorRaw = fila[columnaError];
+      const errorTexto =
+        errorRaw == null || String(errorRaw).trim() === '' ? null : String(errorRaw).trim();
+      const en = normError(errorTexto);
+
+      // Cruce por contención: la frase del KO está contenida en el error del caso.
+      const hits = en ? indice.filter((k) => en.includes(k.n)) : [];
+      const ko = hits.length === 1 ? hits[0] : null; // ambiguo (>1) → pendiente
+      if (ko) conocidas++;
+
+      return {
+        fila,
+        errorTexto,
+        codigo: ko?.codigo ?? null,
+        koId: ko?.id ?? null,
+      };
     });
     const desconocidas = casosPre.length - conocidas;
 
-    // Persistimos lote + casos.
     const [lote] = await db
       .insert(ko_import_lotes)
       .values({
@@ -112,21 +147,26 @@ export async function POST(req: NextRequest) {
         total: casosPre.length,
         conocidas,
         desconocidas,
-        columna_codigo: columnaCodigo,
+        columna_codigo: columnaError,
       })
       .returning();
 
     const values: NewKoImportCaso[] = casosPre.map((c) => ({
       lote_id: lote.id,
       fila: c.fila,
+      error_texto: c.errorTexto,
       codigo: c.codigo,
       tipo: c.koId ? 'conocida' : 'desconocida',
       ko_entry_id: c.koId,
     }));
 
-    const casos = await db.insert(ko_import_casos).values(values).returning();
+    // Insertamos por bloques para no rozar el límite de parámetros de Postgres.
+    const CHUNK = 500;
+    for (let i = 0; i < values.length; i += CHUNK) {
+      await db.insert(ko_import_casos).values(values.slice(i, i + CHUNK));
+    }
 
-    return NextResponse.json({ lote, casos }, { status: 201 });
+    return NextResponse.json({ lote, hoja }, { status: 201 });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
