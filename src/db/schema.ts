@@ -278,7 +278,18 @@ export const ko_import_casos = pgTable(
     codigo: text(),                        // código del KO que cruzó (null si pendiente)
     tipo: text({ enum: ['conocida', 'desconocida'] }).notNull(),
     ko_entry_id: uuid().references(() => ko_entries.id, { onDelete: 'set null' }),
-    estado: text({ enum: ['pendiente', 'resuelto'] }).notNull().default('pendiente'),
+    // Estado de gestión interno de la cuenta (distinto de tipo/normalización).
+    estado: text({ enum: ['pendiente', 'en_revision', 'resuelto'] })
+      .notNull()
+      .default('pendiente'),
+    // Incidencia (solo si el caso lo requiere por sus subprocesos).
+    incidencia_numero: text(),
+    incidencia_estado: text({ enum: ['pendiente', 'enviado', 'ok'] }),
+    // Histórico de cambios: [{ at: ISO, texto }]. Más reciente al final.
+    historial: jsonb()
+      .$type<{ at: string; texto: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     notas: text(),
     resolved_at: timestamp({ withTimezone: true }),
     created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),

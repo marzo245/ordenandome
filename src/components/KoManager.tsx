@@ -1485,8 +1485,21 @@ function ImportarExcel({ onImported }: { onImported: () => void }) {
 
 type SetCasos = React.Dispatch<React.SetStateAction<KoImportCaso[]>>;
 
-const ESTADO_FILTERS = ['Pendientes', 'Resueltos', 'Todos'] as const;
+const ESTADO_FILTERS = ['Por gestionar', 'En revisión', 'Resueltos', 'Todos'] as const;
 type EstadoFilter = (typeof ESTADO_FILTERS)[number];
+
+/** Estado de gestión interno de un caso. */
+type CasoEstado = 'pendiente' | 'en_revision' | 'resuelto';
+const CASO_ESTADO_LABEL: Record<CasoEstado, string> = {
+  pendiente: 'Por gestionar',
+  en_revision: 'En revisión',
+  resuelto: 'Resuelto',
+};
+const INCIDENCIA_LABEL: Record<string, string> = {
+  pendiente: 'Pendiente',
+  enviado: 'Enviado',
+  ok: 'OK',
+};
 
 /**
  * Worklist de casos cuyo código YA está en el catálogo. Agrupa por KO, muestra
@@ -1508,8 +1521,9 @@ function ConocidasTab({
   onImported: () => void;
   onOpenSubproceso: (id: string) => void;
 }) {
-  const [estadoFilter, setEstadoFilter] = useState<EstadoFilter>('Pendientes');
+  const [estadoFilter, setEstadoFilter] = useState<EstadoFilter>('Por gestionar');
   const [clasifFilter, setClasifFilter] = useState('Todas');
+  const [casoModalId, setCasoModalId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1541,7 +1555,8 @@ function ConocidasTab({
     const q = query.trim().toLowerCase();
     const map = new Map<string, { ko: KoEntry | null; casos: KoImportCaso[] }>();
     for (const c of conocidas) {
-      if (estadoFilter === 'Pendientes' && c.estado !== 'pendiente') continue;
+      if (estadoFilter === 'Por gestionar' && c.estado !== 'pendiente') continue;
+      if (estadoFilter === 'En revisión' && c.estado !== 'en_revision') continue;
       if (estadoFilter === 'Resueltos' && c.estado !== 'resuelto') continue;
       const ko = c.ko_entry_id ? entryById.get(c.ko_entry_id) ?? null : null;
       if (clasifFilter !== 'Todas' && (ko?.clasificacion ?? '') !== clasifFilter) continue;
@@ -1682,6 +1697,7 @@ function ConocidasTab({
                   onResolver={(c) => setEstado(c, 'resuelto')}
                   onReabrir={(c) => setEstado(c, 'pendiente')}
                   onResolverGrupo={(ids) => setEstadoBulk(ids, 'resuelto')}
+                  onAbrirCaso={(c) => setCasoModalId(c.id)}
                   onOpenSubproceso={onOpenSubproceso}
                 />
               ))}
@@ -1689,6 +1705,24 @@ function ConocidasTab({
           )}
         </>
       )}
+
+      {/* Modal de gestión de una cuenta */}
+      {casoModalId &&
+        (() => {
+          const c = casos.find((x) => x.id === casoModalId);
+          if (!c) return null;
+          const ko = c.ko_entry_id ? entryById.get(c.ko_entry_id) ?? null : null;
+          return (
+            <CasoModal
+              caso={c}
+              ko={ko}
+              subprocesos={subprocesos}
+              onClose={() => setCasoModalId(null)}
+              onSaved={(u) => setCasos((prev) => prev.map((x) => (x.id === u.id ? u : x)))}
+              onOpenSubproceso={onOpenSubproceso}
+            />
+          );
+        })()}
     </div>
   );
 }
@@ -1702,6 +1736,7 @@ function GrupoConocidas({
   onResolver,
   onReabrir,
   onResolverGrupo,
+  onAbrirCaso,
   onOpenSubproceso,
 }: {
   ko: KoEntry | null;
@@ -1711,6 +1746,7 @@ function GrupoConocidas({
   onResolver: (c: KoImportCaso) => void;
   onReabrir: (c: KoImportCaso) => void;
   onResolverGrupo: (ids: string[]) => void;
+  onAbrirCaso: (c: KoImportCaso) => void;
   onOpenSubproceso: (id: string) => void;
 }) {
   const [abierto, setAbierto] = useState(false);
@@ -1801,15 +1837,28 @@ function GrupoConocidas({
             return (
               <div
                 key={c.id}
-                className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0"
+                className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0"
               >
-                <p
-                  className={`text-sm min-w-0 break-words ${
-                    resuelto ? 'text-[var(--muted)] line-through' : 'text-[var(--text)]'
-                  }`}
+                <button
+                  type="button"
+                  onClick={() => onAbrirCaso(c)}
+                  className="flex-1 min-w-0 text-left group"
+                  title="Gestionar esta cuenta"
                 >
-                  {filaResumen(c.fila) || c.codigo || '—'}
-                </p>
+                  <span
+                    className={`text-sm break-words ${
+                      resuelto ? 'text-[var(--muted)] line-through' : 'text-[var(--text)] group-hover:text-[var(--accent)]'
+                    }`}
+                  >
+                    {filaResumen(c.fila) || c.codigo || '—'}
+                  </span>
+                  <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                    <EstadoBadge estado={c.estado} />
+                    {c.incidencia_estado && (
+                      <IncidenciaBadge estado={c.incidencia_estado} numero={c.incidencia_numero} />
+                    )}
+                  </span>
+                </button>
                 {resuelto ? (
                   <button
                     type="button"
@@ -1834,6 +1883,263 @@ function GrupoConocidas({
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Badge del estado de gestión de un caso. */
+function EstadoBadge({ estado }: { estado: CasoEstado }) {
+  const tone =
+    estado === 'resuelto'
+      ? 'border-[var(--accent)] text-[var(--accent)]'
+      : estado === 'en_revision'
+        ? 'border-[var(--text)] text-[var(--text)]'
+        : 'border-[var(--border)] text-[var(--muted)]';
+  return (
+    <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded-full border ${tone}`}>
+      {CASO_ESTADO_LABEL[estado]}
+    </span>
+  );
+}
+
+/** Badge de la incidencia (estado + número). */
+function IncidenciaBadge({ estado, numero }: { estado: string; numero: string | null }) {
+  return (
+    <span className="inline-block text-[10px] px-1.5 py-0.5 rounded-full border border-[var(--border)] text-[var(--muted)]">
+      Inc. {INCIDENCIA_LABEL[estado] ?? estado}
+      {numero ? ` · ${numero}` : ''}
+    </span>
+  );
+}
+
+/**
+ * Modal de gestión de una cuenta: estado interno (por gestionar / en revisión /
+ * resuelto), incidencia (nº + estado), notas e historial de cambios.
+ */
+function CasoModal({
+  caso,
+  ko,
+  subprocesos,
+  onClose,
+  onSaved,
+  onOpenSubproceso,
+}: {
+  caso: KoImportCaso;
+  ko: KoEntry | null;
+  subprocesos: KoSubproceso[];
+  onClose: () => void;
+  onSaved: (c: KoImportCaso) => void;
+  onOpenSubproceso: (id: string) => void;
+}) {
+  const [estado, setEstado] = useState<CasoEstado>(caso.estado);
+  const [incNumero, setIncNumero] = useState(caso.incidencia_numero ?? '');
+  const [incEstado, setIncEstado] = useState(caso.incidencia_estado ?? '');
+  const [notas, setNotas] = useState(caso.notas ?? '');
+  const [notaHist, setNotaHist] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const subs = ko?.subprocesos ?? [];
+  const historial = [...(caso.historial ?? [])].reverse(); // más reciente primero
+
+  async function guardar() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/ko/casos/${caso.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          estado,
+          incidencia_numero: incNumero.trim() || null,
+          incidencia_estado: incEstado || null,
+          notas: notas.trim() || null,
+          nota_historial: notaHist.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        throw new Error(d?.error || `No se pudo guardar (${res.status})`);
+      }
+      const updated: KoImportCaso = await res.json();
+      onSaved(updated);
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al guardar');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-start justify-center p-4 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[var(--bg)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-xl my-8 max-h-[90vh] overflow-y-auto p-5 flex flex-col gap-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="mono text-[11px] text-[var(--muted)] font-medium mb-1">
+              {caso.codigo || ko?.codigo || 'sin código'}
+            </div>
+            <h2 className="text-lg font-semibold tracking-tight break-words">
+              {ko?.error ?? caso.error_texto ?? 'Cuenta'}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)]"
+          >
+            Cerrar
+          </button>
+        </div>
+
+        {/* Datos de la cuenta */}
+        <div>
+          <SubLabel>Cuenta (fila del Excel)</SubLabel>
+          <pre className="text-xs mono whitespace-pre-wrap bg-[var(--surface)] border border-[var(--border)] rounded p-3 text-[var(--text)] overflow-x-auto">
+            {filaEntries(caso.fila)
+              .map(([k, v]) => `${k}: ${v}`)
+              .join('\n') || '—'}
+          </pre>
+        </div>
+
+        {/* Subprocesos del KO (algunos llevan incidencia) */}
+        {subs.length > 0 && (
+          <div>
+            <SubLabel>Subprocesos</SubLabel>
+            <div className="flex flex-wrap gap-1.5">
+              {subs.map((s) => {
+                const match = resolveSubproceso(s, subprocesos);
+                return match ? (
+                  <Chip key={s} onClick={() => onOpenSubproceso(match.id)} title={`Ir a ${match.codigo}`}>
+                    {s}
+                  </Chip>
+                ) : (
+                  <Chip key={s}>{s}</Chip>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Estado de gestión */}
+        <div>
+          <SubLabel>Estado de gestión</SubLabel>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(['pendiente', 'en_revision', 'resuelto'] as CasoEstado[]).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setEstado(s)}
+                className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                  estado === s
+                    ? 'border-[var(--accent)] text-[var(--accent)] font-medium'
+                    : 'border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)]'
+                }`}
+              >
+                {CASO_ESTADO_LABEL[s]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Incidencia */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Nº de incidencia</label>
+            <input
+              type="text"
+              value={incNumero}
+              onChange={(e) => setIncNumero(e.target.value)}
+              placeholder="p. ej. INC-12345"
+              className={`${inputCls} mono`}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>Estado de incidencia</label>
+            <select
+              value={incEstado}
+              onChange={(e) => setIncEstado(e.target.value)}
+              className={inputCls}
+              aria-label="Estado de incidencia"
+            >
+              <option value="">Sin incidencia</option>
+              <option value="pendiente">Pendiente</option>
+              <option value="enviado">Enviado</option>
+              <option value="ok">OK (resuelta)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Notas */}
+        <div>
+          <label className={labelCls}>Notas</label>
+          <textarea
+            value={notas}
+            onChange={(e) => setNotas(e.target.value)}
+            rows={2}
+            placeholder="Notas de gestión de esta cuenta"
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        {/* Apunte para el histórico */}
+        <div>
+          <label className={labelCls}>Añadir al histórico (opcional)</label>
+          <input
+            type="text"
+            value={notaHist}
+            onChange={(e) => setNotaHist(e.target.value)}
+            placeholder="p. ej. esperando respuesta de Juanma"
+            className={inputCls}
+          />
+        </div>
+
+        {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={guardar}
+            disabled={busy}
+            className="text-sm px-3 py-1.5 rounded bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {busy ? 'Guardando…' : 'Guardar'}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)] disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+        </div>
+
+        {/* Histórico */}
+        <div>
+          <SubLabel>Histórico</SubLabel>
+          {historial.length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">Sin movimientos aún.</p>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {historial.map((h, i) => (
+                <li key={i} className="text-xs flex gap-2">
+                  <span className="text-[var(--muted)] whitespace-nowrap">
+                    {new Date(h.at).toLocaleString('es')}
+                  </span>
+                  <span className="text-[var(--text)]">{h.texto}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

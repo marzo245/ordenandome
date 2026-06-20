@@ -8,7 +8,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { db, ko_import_casos } from '@/db';
-import { inArray } from 'drizzle-orm';
+import { inArray, sql } from 'drizzle-orm';
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,12 +31,16 @@ export async function POST(req: NextRequest) {
 
     if (action === 'resolver' || action === 'reabrir') {
       const estado = action === 'resolver' ? 'resuelto' : 'pendiente';
+      // Registramos el cambio en el histórico de cada caso (append jsonb sin leer).
+      const at = new Date().toISOString();
+      const texto = action === 'resolver' ? 'Resuelto' : 'Por gestionar';
       const updated = await db
         .update(ko_import_casos)
         .set({
           estado,
           resolved_at: action === 'resolver' ? new Date() : null,
           updated_at: new Date(),
+          historial: sql`${ko_import_casos.historial} || jsonb_build_array(jsonb_build_object('at', ${at}::text, 'texto', ${texto}::text))`,
         })
         .where(inArray(ko_import_casos.id, ids))
         .returning({ id: ko_import_casos.id });

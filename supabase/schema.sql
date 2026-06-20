@@ -73,13 +73,21 @@ create table if not exists ko_import_casos (
   codigo      text,
   tipo        text not null check (tipo in ('conocida','desconocida')),
   ko_entry_id uuid references ko_entries(id) on delete set null,
-  estado      text not null default 'pendiente' check (estado in ('pendiente','resuelto')),
+  estado      text not null default 'pendiente' check (estado in ('pendiente','en_revision','resuelto')),
+  incidencia_numero text,
+  incidencia_estado text check (incidencia_estado in ('pendiente','enviado','ok')),
+  historial   jsonb not null default '[]'::jsonb,
   notas       text,
   resolved_at timestamptz,
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now()
 );
 alter table ko_import_casos add column if not exists error_texto text;
+alter table ko_import_casos add column if not exists incidencia_numero text;
+alter table ko_import_casos add column if not exists incidencia_estado text;
+alter table ko_import_casos add column if not exists historial jsonb not null default '[]'::jsonb;
+alter table ko_import_casos drop constraint if exists ko_import_casos_estado_check;
+alter table ko_import_casos add constraint ko_import_casos_estado_check check (estado in ('pendiente','en_revision','resuelto'));
 
 create index if not exists idx_ko_casos_lote on ko_import_casos(lote_id);
 create index if not exists idx_ko_casos_tipo_estado on ko_import_casos(tipo, estado);
