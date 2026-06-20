@@ -59,21 +59,13 @@ function elegirHoja(wb: XLSX.WorkBook): string {
 }
 
 /**
- * Columna para CRUZAR: el mensaje crudo del sistema (ECO_Notes), que incluye el
- * código del error (p. ej. "EN 244") que distingue KOs con el mismo enunciado.
- * Si no existe, cae al "Error normalizado".
+ * Columna del "Error normalizado": el ÚNICO criterio de cruce. Todas las filas
+ * con el mismo "Error normalizado" reciben el mismo veredicto (no se separan por
+ * el mensaje crudo). Si no se detecta, se pide al usuario que la elija.
  */
-function detectarColumnaMatch(headers: string[], pedida: string | null): string | null {
+function detectarColumnaError(headers: string[], pedida: string | null): string | null {
   if (pedida && headers.includes(pedida)) return pedida;
-  const eco = headers.find((h) => normHeader(h).includes('econotes'));
-  if (eco) return eco;
-  const norm = headers.find((h) => normHeader(h) === 'errornormalizado');
-  return norm ?? null;
-}
-
-/** Columna ETIQUETA para agrupar las pendientes: el "Error normalizado" si existe. */
-function detectarColumnaLabel(headers: string[], fallback: string): string {
-  return headers.find((h) => normHeader(h) === 'errornormalizado') ?? fallback;
+  return headers.find((h) => normHeader(h) === 'errornormalizado') ?? null;
 }
 
 export async function POST(req: NextRequest) {
@@ -107,15 +99,14 @@ export async function POST(req: NextRequest) {
     }
 
     const headers = Object.keys(filas[0]);
-    const columnaMatch = detectarColumnaMatch(
+    const columnaError = detectarColumnaError(
       headers,
       typeof columnaPedida === 'string' ? columnaPedida : null
     );
-    if (!columnaMatch) {
+    if (!columnaError) {
       // No pudimos decidir la columna: que el usuario la elija y reintente.
       return NextResponse.json({ needsColumn: true, columnas: headers });
     }
-    const columnaLabel = detectarColumnaLabel(headers, columnaMatch);
 
     // Catálogo para el cruce por contención. Solo errores con suficiente longitud
     // (evita que frases muy cortas generen falsos positivos).
@@ -124,26 +115,26 @@ export async function POST(req: NextRequest) {
       .map((ko) => ({ id: ko.id, codigo: ko.codigo, n: normError(ko.error) }))
       .filter((k) => k.n.length >= 8);
 
-    // Devuelve el KO si EXACTAMENTE uno está contenido en el texto (ambiguo → null).
-    const matchUnico = (txt: unknown): (typeof indice)[number] | null => {
-      const t = normError(txt);
+    // El cruce se cachea por "Error normalizado": todas las filas con el mismo
+    // texto reciben EXACTAMENTE el mismo veredicto.
+    const cache = new Map<string, (typeof indice)[number] | null>();
+    const matchUnico = (texto: string | null): (typeof indice)[number] | null => {
+      const t = normError(texto);
       if (!t) return null;
+      if (cache.has(t)) return cache.get(t)!;
       const hits = indice.filter((k) => t.includes(k.n));
-      return hits.length === 1 ? hits[0] : null;
+      const ko = hits.length === 1 ? hits[0] : null; // 0 o ambiguo (>1) → pendiente
+      cache.set(t, ko);
+      return ko;
     };
 
     let conocidas = 0;
     const casosPre = filas.map((fila) => {
-      // Etiqueta legible para agrupar pendientes (el "Error normalizado").
-      const labelRaw = fila[columnaLabel];
-      const errorTexto =
-        labelRaw == null || String(labelRaw).trim() === '' ? null : String(labelRaw).trim();
+      const raw = fila[columnaError];
+      const errorTexto = raw == null || String(raw).trim() === '' ? null : String(raw).trim();
 
-      // Doble pasada: 1) "Error normalizado" (criterio principal, lo que el
-      // usuario normaliza y mantiene); 2) si no cruza o es ambiguo, desempata por
-      // ECO_Notes (el crudo incluye el código del error). Solo coincidencia única.
-      let ko = matchUnico(fila[columnaLabel]);
-      if (!ko && columnaLabel !== columnaMatch) ko = matchUnico(fila[columnaMatch]);
+      // ÚNICO criterio: el "Error normalizado".
+      const ko = matchUnico(errorTexto);
       if (ko) conocidas++;
 
       return {
@@ -162,7 +153,7 @@ export async function POST(req: NextRequest) {
         total: casosPre.length,
         conocidas,
         desconocidas,
-        columna_codigo: columnaMatch,
+        columna_codigo: columnaError,
       })
       .returning();
 
