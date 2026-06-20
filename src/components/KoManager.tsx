@@ -1924,26 +1924,28 @@ function PendientesTab({
   const [buffer, setBuffer] = useState<EntryBuffer | null>(null);
   const [linkId, setLinkId] = useState('');
   const [linkQuery, setLinkQuery] = useState('');
+  const [linkOpen, setLinkOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const koLabel = (e: KoEntry) => (e.codigo ? `${e.codigo} · ` : '') + e.error;
 
-  // Resultados del buscador de "Vincular a un KO existente".
+  // Resultados del desplegable de "Vincular a un KO existente". Sin texto (o con
+  // el KO ya elegido) muestra todos; al escribir, filtra por código/error/clasif.
   const linkMatches = useMemo(() => {
-    const q = linkQuery.trim().toLowerCase();
-    if (!q) return [];
-    return entries
-      .filter((e) =>
-        [e.codigo, e.error, e.clasificacion]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-          .includes(q),
-      )
-      .slice(0, 30);
-  }, [entries, linkQuery]);
+    const q = linkId ? '' : linkQuery.trim().toLowerCase();
+    const base = q
+      ? entries.filter((e) =>
+          [e.codigo, e.error, e.clasificacion]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+            .includes(q),
+        )
+      : entries;
+    return base.slice(0, 50);
+  }, [entries, linkQuery, linkId]);
 
   // Agrupa las desconocidas por su texto de error, de mayor a menor volumen.
   const grupos = useMemo<GrupoPendiente[]>(() => {
@@ -1977,6 +1979,7 @@ function PendientesTab({
     setBuffer(null);
     setLinkId('');
     setLinkQuery('');
+    setLinkOpen(false);
     setError(null);
   }
 
@@ -2116,6 +2119,7 @@ function PendientesTab({
                   setBuffer(null);
                   setLinkId('');
                   setLinkQuery('');
+                  setLinkOpen(false);
                   setError(null);
                 }}
                 className="text-left rounded-lg border border-[var(--border)] bg-[var(--surface)] p-3 hover:border-[var(--accent)] transition-colors flex items-center justify-between gap-3"
@@ -2217,22 +2221,35 @@ function PendientesTab({
                         onChange={(e) => {
                           setLinkQuery(e.target.value);
                           setLinkId('');
+                          setLinkOpen(true);
                         }}
-                        placeholder="Buscar KO por código, error o clasificación…"
-                        className={`${inputCls} w-full`}
+                        onFocus={() => setLinkOpen(true)}
+                        onBlur={() => setTimeout(() => setLinkOpen(false), 150)}
+                        placeholder="Elegir KO… (clic para ver todos, escribe para filtrar)"
+                        className={`${inputCls} w-full pr-7`}
                         aria-label="Buscar KO al que vincular"
                       />
-                      {!linkId && linkMatches.length > 0 && (
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--muted)]"
+                      >
+                        ▾
+                      </span>
+                      {linkOpen && linkMatches.length > 0 && (
                         <div className="absolute z-10 mt-1 w-full max-h-60 overflow-y-auto rounded border border-[var(--border)] bg-[var(--bg)] shadow-lg">
                           {linkMatches.map((e) => (
                             <button
                               key={e.id}
                               type="button"
+                              onMouseDown={(ev) => ev.preventDefault()}
                               onClick={() => {
                                 setLinkId(e.id);
                                 setLinkQuery(koLabel(e));
+                                setLinkOpen(false);
                               }}
-                              className="block w-full text-left px-2 py-1.5 text-sm hover:bg-[var(--surface-hover)]"
+                              className={`block w-full text-left px-2 py-1.5 text-sm hover:bg-[var(--surface-hover)] ${
+                                e.id === linkId ? 'bg-[var(--surface-hover)]' : ''
+                              }`}
                             >
                               <span className="mono text-[11px] text-[var(--muted)] mr-2">
                                 {e.codigo || '—'}
@@ -2245,7 +2262,7 @@ function PendientesTab({
                           ))}
                         </div>
                       )}
-                      {!linkId && linkQuery.trim() && linkMatches.length === 0 && (
+                      {linkOpen && !linkId && linkQuery.trim() && linkMatches.length === 0 && (
                         <p className="mt-1 text-xs text-[var(--muted)]">Sin KOs que coincidan.</p>
                       )}
                     </div>
