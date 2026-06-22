@@ -7,7 +7,7 @@
 import { NextResponse } from 'next/server';
 import { db, ko_entries, ko_import_casos } from '@/db';
 import { eq, inArray } from 'drizzle-orm';
-import { buildKoIndex, createKoMatcher } from '@/lib/ko-match';
+import { buildKoIndex, createKoMatcher, ecoNotesDeFila } from '@/lib/ko-match';
 
 export const maxDuration = 60;
 
@@ -23,7 +23,7 @@ export async function POST() {
     // Agrupamos las pendientes que ahora cruzan, por KO, para actualizar en bloque.
     const porKo = new Map<string, { codigo: string | null; ids: string[] }>();
     for (const c of pendientes) {
-      const ko = match(c.error_texto);
+      const ko = match(c.error_texto, ecoNotesDeFila(c.fila));
       if (!ko) continue;
       if (!porKo.has(ko.id)) porKo.set(ko.id, { codigo: ko.codigo, ids: [] });
       porKo.get(ko.id)!.ids.push(c.id);

@@ -17,7 +17,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as XLSX from 'xlsx';
 import { db, ko_entries, ko_import_lotes, ko_import_casos } from '@/db';
 import type { NewKoImportCaso } from '@/db';
-import { buildKoIndex, createKoMatcher } from '@/lib/ko-match';
+import { buildKoIndex, createKoMatcher, ecoNotesDeFila } from '@/lib/ko-match';
 
 export const maxDuration = 60;
 
@@ -109,8 +109,8 @@ export async function POST(req: NextRequest) {
       const raw = fila[columnaError];
       const errorTexto = raw == null || String(raw).trim() === '' ? null : String(raw).trim();
 
-      // ÚNICO criterio: el "Error normalizado".
-      const ko = matchUnico(errorTexto);
+      // Cruce por "Error normalizado"; desempate por ECO_Notes si cruza con varios.
+      const ko = matchUnico(errorTexto, ecoNotesDeFila(fila));
       if (ko) conocidas++;
 
       return {
