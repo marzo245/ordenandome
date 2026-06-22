@@ -94,3 +94,20 @@ create index if not exists idx_ko_casos_tipo_estado on ko_import_casos(tipo, est
 create index if not exists idx_ko_casos_codigo on ko_import_casos(codigo);
 create index if not exists idx_ko_casos_ko on ko_import_casos(ko_entry_id);
 create index if not exists idx_ko_casos_error on ko_import_casos(error_texto);
+
+-- Catálogo de incidencias (plantillas que se radican; especializan "Radicar Incidencia").
+-- Un KO referencia las suyas en ko_entries.incidencias (array de códigos).
+create table if not exists ko_incidencias (
+  id            uuid primary key default gen_random_uuid(),
+  codigo        text not null unique,
+  titulo        text not null,
+  tipo          text not null default 'INC' check (tipo in ('INC','RITM')),
+  descripcion   text,
+  adjunto       text not null default 'no' check (adjunto in ('si','no')),
+  sistema       text,
+  ans           integer,
+  documentacion text,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+alter table ko_entries add column if not exists incidencias text[] default '{}';

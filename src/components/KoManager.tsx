@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { KoEntry, KoSubproceso, KoImportCaso, KoImportLote } from '@/db';
+import type { KoEntry, KoSubproceso, KoIncidencia, KoImportCaso, KoImportLote } from '@/db';
 import MarkdownImageTextarea from './MarkdownImageTextarea';
 import KoResumen from './KoResumen';
 
@@ -114,6 +114,54 @@ function resolveSubproceso(
   );
 }
 
+/** Resuelve una referencia de incidencia (código o título) contra el catálogo. */
+function resolveIncidencia(
+  ref: string,
+  incidencias: KoIncidencia[],
+): KoIncidencia | null {
+  const r = ref.trim().toLowerCase();
+  return (
+    incidencias.find((x) => (x.codigo ?? '').toLowerCase() === r) ??
+    incidencias.find((x) => (x.titulo ?? '').toLowerCase() === r) ??
+    null
+  );
+}
+
+/** Chips de incidencias referenciadas por un KO (código + título + tipo). */
+function IncidenciasInline({
+  refs,
+  incidencias,
+}: {
+  refs: string[];
+  incidencias: KoIncidencia[];
+}) {
+  if (refs.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {refs.map((ref) => {
+        const inc = resolveIncidencia(ref, incidencias);
+        return (
+          <span
+            key={ref}
+            className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
+            title={
+              inc
+                ? `${inc.tipo} · ${inc.sistema ?? 'sin sistema'} · ANS ${inc.ans ?? '?'}d${inc.descripcion ? `\n\n${inc.descripcion}` : ''}`
+                : ref
+            }
+          >
+            <span className="mono text-[var(--muted)]">{inc?.codigo ?? ref}</span>
+            {inc?.titulo && <span className="max-w-[14rem] truncate">{inc.titulo}</span>}
+            {inc?.tipo && (
+              <span className="text-[10px] uppercase text-[var(--muted)]">{inc.tipo}</span>
+            )}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ================================================================== */
 /* Root                                                               */
 /* ================================================================== */
@@ -123,15 +171,17 @@ function resolveSubproceso(
  * el catálogo de KOs y los subprocesos. Permite ver/crear/editar/borrar cada
  * entrada contra `/api/ko` y `/api/ko/subprocesos`.
  */
-type Tab = 'resumen' | 'catalogo' | 'subprocesos' | 'conocidas' | 'pendientes';
+type Tab = 'resumen' | 'catalogo' | 'subprocesos' | 'incidencias' | 'conocidas' | 'pendientes';
 
 export default function KoManager({
   initialEntries,
   initialSubprocesos,
+  initialIncidencias,
   initialCasos,
 }: {
   initialEntries: KoEntry[];
   initialSubprocesos: KoSubproceso[];
+  initialIncidencias: KoIncidencia[];
   initialCasos: KoImportCaso[];
 }) {
   const router = useRouter();
@@ -170,6 +220,12 @@ export default function KoManager({
         >
           Subprocesos
         </TabButton>
+        <TabButton
+          active={tab === 'incidencias'}
+          onClick={() => setTab('incidencias')}
+        >
+          Incidencias
+        </TabButton>
         <TabButton active={tab === 'conocidas'} onClick={() => setTab('conocidas')}>
           Conocidas
         </TabButton>
@@ -194,6 +250,7 @@ export default function KoManager({
         <CatalogoTab
           initial={initialEntries}
           subprocesos={initialSubprocesos}
+          incidencias={initialIncidencias}
           onOpenSubproceso={goToSubproceso}
         />
       )}
@@ -204,10 +261,14 @@ export default function KoManager({
           onOpened={() => setOpenSubprocesoId(null)}
         />
       )}
+      {tab === 'incidencias' && (
+        <IncidenciasTab initial={initialIncidencias} />
+      )}
       {tab === 'conocidas' && (
         <ConocidasTab
           entries={initialEntries}
           subprocesos={initialSubprocesos}
+          incidencias={initialIncidencias}
           casos={casos}
           setCasos={setCasos}
           onImported={() => router.refresh()}
@@ -217,6 +278,8 @@ export default function KoManager({
       {tab === 'pendientes' && (
         <PendientesTab
           entries={initialEntries}
+          subprocesos={initialSubprocesos}
+          incidencias={initialIncidencias}
           casos={casos}
           setCasos={setCasos}
           onImported={() => router.refresh()}
@@ -266,6 +329,7 @@ type EntryBuffer = {
   sistema_solucion: string;
   responsable: string;
   subprocesos: string; // CSV
+  incidencias: string; // CSV de códigos de incidencia
   resolucion: string;
   documentacion: string;
   flujograma_url: string;
@@ -283,6 +347,7 @@ function entryToBuffer(e: KoEntry): EntryBuffer {
     sistema_solucion: e.sistema_solucion ?? '',
     responsable: e.responsable ?? '',
     subprocesos: (e.subprocesos ?? []).join(', '),
+    incidencias: (e.incidencias ?? []).join(', '),
     resolucion: e.resolucion ?? '',
     documentacion: e.documentacion ?? '',
     flujograma_url: e.flujograma_url ?? '',
@@ -292,10 +357,12 @@ function entryToBuffer(e: KoEntry): EntryBuffer {
 function CatalogoTab({
   initial,
   subprocesos,
+  incidencias,
   onOpenSubproceso,
 }: {
   initial: KoEntry[];
   subprocesos: KoSubproceso[];
+  incidencias: KoIncidencia[];
   onOpenSubproceso: (id: string) => void;
 }) {
   const [entries, setEntries] = useState<KoEntry[]>(initial);
@@ -385,6 +452,10 @@ function CatalogoTab({
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
+      const incidencias = buffer.incidencias
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
       const flujoNum = buffer.flujo.trim() === '' ? null : Number(buffer.flujo);
       const res = await fetch(`/api/ko/${selected.id}`, {
         method: 'PATCH',
@@ -400,6 +471,7 @@ function CatalogoTab({
           sistema_solucion: buffer.sistema_solucion || null,
           responsable: buffer.responsable || null,
           subprocesos,
+          incidencias,
           resolucion: buffer.resolucion || null,
           documentacion: buffer.documentacion || null,
           flujograma_url: buffer.flujograma_url || null,
@@ -554,11 +626,14 @@ function CatalogoTab({
                 onSave={save}
                 onCancel={cancelEdit}
                 onRemove={remove}
+                subprocesos={subprocesos}
+                incidencias={incidencias}
               />
             ) : (
               <EntryView
                 selected={selected}
                 subprocesos={subprocesos}
+                incidencias={incidencias}
                 onEdit={startEdit}
                 onClose={() => setSelectedId(null)}
                 onOpenSubproceso={onOpenSubproceso}
@@ -574,17 +649,20 @@ function CatalogoTab({
 function EntryView({
   selected,
   subprocesos,
+  incidencias,
   onEdit,
   onClose,
   onOpenSubproceso,
 }: {
   selected: KoEntry;
   subprocesos: KoSubproceso[];
+  incidencias: KoIncidencia[];
   onEdit: () => void;
   onClose: () => void;
   onOpenSubproceso: (id: string) => void;
 }) {
   const subs = selected.subprocesos ?? [];
+  const incs = selected.incidencias ?? [];
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-start justify-between gap-3">
@@ -661,6 +739,13 @@ function EntryView({
         </div>
       )}
 
+      {incs.length > 0 && (
+        <div>
+          <SubLabel>Incidencias a radicar</SubLabel>
+          <IncidenciasInline refs={incs} incidencias={incidencias} />
+        </div>
+      )}
+
       <div>
         <SubLabel>Resolución</SubLabel>
         <Markdown value={selected.resolucion} />
@@ -695,6 +780,386 @@ function Meta({ label, value }: { label: string; value: string | null }) {
   );
 }
 
+/** Próximo código `SP-NNN` libre a partir del catálogo (para crear al vuelo). */
+function nextSubprocesoCodigo(catalog: KoSubproceso[]): string {
+  let max = 0;
+  for (const s of catalog) {
+    const m = /^SP-(\d+)$/i.exec((s.codigo ?? '').trim());
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  }
+  return `SP-${String(max + 1).padStart(3, '0')}`;
+}
+
+/**
+ * Selector de subprocesos del KO. Busca contra el catálogo existente (por código
+ * o nombre) y, si lo que escribes no existe, permite CREARLO al vuelo (POST a
+ * `/api/ko/subprocesos`) y lo deja seleccionado. El valor se mantiene como CSV de
+ * referencias (códigos) en el buffer, igual que antes.
+ */
+function SubprocesosPicker({
+  value,
+  onChange,
+  catalog,
+  onCreated,
+}: {
+  value: string;
+  onChange: (csv: string) => void;
+  catalog: KoSubproceso[];
+  onCreated?: (s: KoSubproceso) => void;
+}) {
+  const [extra, setExtra] = useState<KoSubproceso[]>([]);
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const all = useMemo(() => [...catalog, ...extra], [catalog, extra]);
+  const selected = useMemo(
+    () => value.split(',').map((s) => s.trim()).filter(Boolean),
+    [value],
+  );
+
+  function setSelected(next: string[]) {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const s of next) {
+      const k = s.toLowerCase();
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(s);
+      }
+    }
+    onChange(out.join(', '));
+  }
+
+  function add(ref: string) {
+    setSelected([...selected, ref]);
+    setQuery('');
+    setOpen(false);
+    setError(null);
+  }
+
+  const q = query.trim().toLowerCase();
+  const selectedSet = new Set(selected.map((s) => s.toLowerCase()));
+  const matches = all
+    .filter((s) => {
+      if (
+        selectedSet.has((s.codigo ?? '').toLowerCase()) ||
+        selectedSet.has((s.nombre ?? '').toLowerCase())
+      ) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        (s.codigo ?? '').toLowerCase().includes(q) ||
+        (s.nombre ?? '').toLowerCase().includes(q)
+      );
+    })
+    .slice(0, 50);
+  const exactExists = all.some(
+    (s) => (s.codigo ?? '').toLowerCase() === q || (s.nombre ?? '').toLowerCase() === q,
+  );
+
+  async function crear() {
+    const nombre = query.trim();
+    if (!nombre || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const codigo = nextSubprocesoCodigo(all);
+      const res = await fetch('/api/ko/subprocesos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo, nombre }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `No se pudo crear (${res.status})`);
+      const created = data as KoSubproceso;
+      setExtra((prev) => [...prev, created]);
+      onCreated?.(created);
+      add(created.codigo);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al crear subproceso');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selected.map((ref) => {
+            const match = resolveSubproceso(ref, all);
+            return (
+              <span
+                key={ref}
+                className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
+                title={match ? `${match.codigo} — ${match.nombre}` : ref}
+              >
+                <span className="mono">{match?.codigo ?? ref}</span>
+                {match?.nombre && (
+                  <span className="text-[var(--muted)] max-w-[10rem] truncate">
+                    {match.nombre}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelected(selected.filter((s) => s !== ref))}
+                  className="text-[var(--muted)] hover:text-[var(--danger)] leading-none"
+                  aria-label={`Quitar ${ref}`}
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="relative">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (matches.length === 1) add(matches[0].codigo);
+              else if (q && !exactExists) void crear();
+            }
+          }}
+          placeholder="Buscar subproceso… (o escribe uno nuevo para crearlo)"
+          className={inputCls}
+          aria-label="Buscar o crear subproceso"
+        />
+        {open && (matches.length > 0 || (q && !exactExists)) && (
+          <div className="absolute z-10 mt-1 w-full max-h-60 overflow-y-auto rounded border border-[var(--border)] bg-[var(--bg)] shadow-lg">
+            {matches.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onMouseDown={(ev) => ev.preventDefault()}
+                onClick={() => add(s.codigo)}
+                className="block w-full text-left px-2 py-1.5 text-sm hover:bg-[var(--surface-hover)]"
+              >
+                <span className="mono text-[11px] text-[var(--muted)] mr-2">
+                  {s.codigo}
+                </span>
+                {s.nombre}
+              </button>
+            ))}
+            {q && !exactExists && (
+              <button
+                type="button"
+                onMouseDown={(ev) => ev.preventDefault()}
+                onClick={() => void crear()}
+                disabled={busy}
+                className="block w-full text-left px-2 py-1.5 text-sm text-[var(--accent)] hover:bg-[var(--surface-hover)] disabled:opacity-50 border-t border-[var(--border)]"
+              >
+                {busy ? 'Creando…' : `+ Crear subproceso «${query.trim()}»`}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {error && <p className="text-xs text-[var(--danger)]">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * Selector de incidencias del KO. Busca contra el catálogo (código o título) y,
+ * si lo que escribes no existe, lo CREA al vuelo (POST a `/api/ko/incidencias`,
+ * que autogenera el código) y lo deja seleccionado. El valor se mantiene como CSV
+ * de códigos en el buffer.
+ */
+function IncidenciasPicker({
+  value,
+  onChange,
+  catalog,
+}: {
+  value: string;
+  onChange: (csv: string) => void;
+  catalog: KoIncidencia[];
+}) {
+  const [extra, setExtra] = useState<KoIncidencia[]>([]);
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const all = useMemo(() => [...catalog, ...extra], [catalog, extra]);
+  const selected = useMemo(
+    () => value.split(',').map((s) => s.trim()).filter(Boolean),
+    [value],
+  );
+
+  function setSelected(next: string[]) {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const s of next) {
+      const k = s.toLowerCase();
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(s);
+      }
+    }
+    onChange(out.join(', '));
+  }
+
+  function add(ref: string) {
+    setSelected([...selected, ref]);
+    setQuery('');
+    setOpen(false);
+    setError(null);
+  }
+
+  const q = query.trim().toLowerCase();
+  const selectedSet = new Set(selected.map((s) => s.toLowerCase()));
+  const matches = all
+    .filter((x) => {
+      if (
+        selectedSet.has((x.codigo ?? '').toLowerCase()) ||
+        selectedSet.has((x.titulo ?? '').toLowerCase())
+      ) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        (x.codigo ?? '').toLowerCase().includes(q) ||
+        (x.titulo ?? '').toLowerCase().includes(q) ||
+        (x.sistema ?? '').toLowerCase().includes(q)
+      );
+    })
+    .slice(0, 50);
+  const exactExists = all.some(
+    (x) => (x.codigo ?? '').toLowerCase() === q || (x.titulo ?? '').toLowerCase() === q,
+  );
+
+  async function crear() {
+    const titulo = query.trim();
+    if (!titulo || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/ko/incidencias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ titulo }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `No se pudo crear (${res.status})`);
+      const created = data as KoIncidencia;
+      setExtra((prev) => [...prev, created]);
+      add(created.codigo);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al crear incidencia');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {selected.map((ref) => {
+            const inc = resolveIncidencia(ref, all);
+            return (
+              <span
+                key={ref}
+                className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-[var(--border)] bg-[var(--surface)] text-[var(--text)]"
+                title={inc ? `${inc.tipo} · ${inc.sistema ?? ''} · ANS ${inc.ans ?? '?'}d` : ref}
+              >
+                <span className="mono">{inc?.codigo ?? ref}</span>
+                {inc?.titulo && (
+                  <span className="text-[var(--muted)] max-w-[12rem] truncate">
+                    {inc.titulo}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelected(selected.filter((s) => s !== ref))}
+                  className="text-[var(--muted)] hover:text-[var(--danger)] leading-none"
+                  aria-label={`Quitar ${ref}`}
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="relative">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              if (matches.length === 1) add(matches[0].codigo);
+              else if (q && !exactExists) void crear();
+            }
+          }}
+          placeholder="Buscar incidencia… (o escribe un título nuevo para crearla)"
+          className={inputCls}
+          aria-label="Buscar o crear incidencia"
+        />
+        {open && (matches.length > 0 || (q && !exactExists)) && (
+          <div className="absolute z-10 mt-1 w-full max-h-60 overflow-y-auto rounded border border-[var(--border)] bg-[var(--bg)] shadow-lg">
+            {matches.map((x) => (
+              <button
+                key={x.id}
+                type="button"
+                onMouseDown={(ev) => ev.preventDefault()}
+                onClick={() => add(x.codigo)}
+                className="block w-full text-left px-2 py-1.5 text-sm hover:bg-[var(--surface-hover)]"
+              >
+                <span className="mono text-[11px] text-[var(--muted)] mr-2">{x.codigo}</span>
+                {x.titulo}
+                <span className="text-[var(--muted)]">
+                  {' '}
+                  · {x.tipo}
+                  {x.sistema ? ` · ${x.sistema}` : ''}
+                </span>
+              </button>
+            ))}
+            {q && !exactExists && (
+              <button
+                type="button"
+                onMouseDown={(ev) => ev.preventDefault()}
+                onClick={() => void crear()}
+                disabled={busy}
+                className="block w-full text-left px-2 py-1.5 text-sm text-[var(--accent)] hover:bg-[var(--surface-hover)] disabled:opacity-50 border-t border-[var(--border)]"
+              >
+                {busy ? 'Creando…' : `+ Crear incidencia «${query.trim()}»`}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {error && <p className="text-xs text-[var(--danger)]">{error}</p>}
+      <p className="text-[11px] text-[var(--muted)]">
+        Al crearla aquí queda con lo básico; completa tipo, sistema, ANS y texto en la
+        pestaña Incidencias.
+      </p>
+    </div>
+  );
+}
+
 function EntryEditor({
   buffer,
   setBuffer,
@@ -702,6 +1167,9 @@ function EntryEditor({
   onSave,
   onCancel,
   onRemove,
+  subprocesos,
+  incidencias,
+  onSubprocesoCreated,
 }: {
   buffer: EntryBuffer;
   setBuffer: (b: EntryBuffer) => void;
@@ -709,6 +1177,9 @@ function EntryEditor({
   onSave: () => void;
   onCancel: () => void;
   onRemove: () => void;
+  subprocesos: KoSubproceso[];
+  incidencias: KoIncidencia[];
+  onSubprocesoCreated?: (s: KoSubproceso) => void;
 }) {
   const upd = (patch: Partial<EntryBuffer>) => setBuffer({ ...buffer, ...patch });
   return (
@@ -825,15 +1296,23 @@ function EntryEditor({
           />
         </div>
         <div>
-          <label className={labelCls}>Subprocesos (CSV)</label>
-          <input
-            type="text"
+          <label className={labelCls}>Subprocesos</label>
+          <SubprocesosPicker
             value={buffer.subprocesos}
-            onChange={(e) => upd({ subprocesos: e.target.value })}
-            placeholder="SP-001, SP-003"
-            className={inputCls}
+            onChange={(v) => upd({ subprocesos: v })}
+            catalog={subprocesos}
+            onCreated={onSubprocesoCreated}
           />
         </div>
+      </div>
+
+      <div>
+        <label className={labelCls}>Incidencias a radicar</label>
+        <IncidenciasPicker
+          value={buffer.incidencias}
+          onChange={(v) => upd({ incidencias: v })}
+          catalog={incidencias}
+        />
       </div>
 
       <div>
@@ -1272,6 +1751,409 @@ function SubprocesosTab({
 }
 
 /* ================================================================== */
+/* Tab — Incidencias (catálogo de plantillas)                         */
+/* ================================================================== */
+
+type IncBuffer = {
+  codigo: string;
+  titulo: string;
+  tipo: 'INC' | 'RITM';
+  sistema: string;
+  ans: string;
+  adjunto: 'si' | 'no';
+  descripcion: string;
+  documentacion: string;
+};
+
+function incToBuffer(x: KoIncidencia): IncBuffer {
+  return {
+    codigo: x.codigo ?? '',
+    titulo: x.titulo ?? '',
+    tipo: (x.tipo as 'INC' | 'RITM') ?? 'INC',
+    sistema: x.sistema ?? '',
+    ans: x.ans != null ? String(x.ans) : '',
+    adjunto: (x.adjunto as 'si' | 'no') ?? 'no',
+    descripcion: x.descripcion ?? '',
+    documentacion: x.documentacion ?? '',
+  };
+}
+
+/** Catálogo de incidencias: lista + detalle/editor (mismo patrón que Subprocesos). */
+function IncidenciasTab({ initial }: { initial: KoIncidencia[] }) {
+  const [incidencias, setIncidencias] = useState<KoIncidencia[]>(initial);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [buffer, setBuffer] = useState<IncBuffer | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+
+  useEffect(() => setIncidencias(initial), [initial]);
+
+  const selected = useMemo(
+    () => incidencias.find((x) => x.id === selectedId) ?? null,
+    [incidencias, selectedId],
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return incidencias;
+    return incidencias.filter((x) =>
+      [x.codigo, x.titulo, x.sistema, x.tipo]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [incidencias, query]);
+
+  function select(id: string) {
+    setSelectedId(id);
+    setEditing(false);
+    setBuffer(null);
+    setError(null);
+  }
+
+  async function createNew() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/ko/incidencias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ titulo: 'Nueva incidencia' }),
+      });
+      if (!res.ok) throw new Error(`POST falló (${res.status})`);
+      const created: KoIncidencia = await res.json();
+      setIncidencias((prev) => [...prev, created]);
+      setSelectedId(created.id);
+      setBuffer(incToBuffer(created));
+      setEditing(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al crear');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    if (!selected || !buffer) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const ansNum = buffer.ans.trim() === '' ? null : Number(buffer.ans);
+      const res = await fetch(`/api/ko/incidencias/${selected.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          codigo: buffer.codigo.trim() || selected.codigo,
+          titulo: buffer.titulo.trim() || 'Sin título',
+          tipo: buffer.tipo,
+          sistema: buffer.sistema || null,
+          ans: Number.isNaN(ansNum as number) ? null : ansNum,
+          adjunto: buffer.adjunto,
+          descripcion: buffer.descripcion || null,
+          documentacion: buffer.documentacion || null,
+        }),
+      });
+      if (!res.ok) throw new Error(`PATCH falló (${res.status})`);
+      const updated: KoIncidencia = await res.json();
+      setIncidencias((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+      setEditing(false);
+      setBuffer(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al guardar');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!selected) return;
+    if (!confirm(`¿Eliminar "${selected.codigo} — ${selected.titulo}"?`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/ko/incidencias/${selected.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`DELETE falló (${res.status})`);
+      const removedId = selected.id;
+      setIncidencias((prev) => prev.filter((x) => x.id !== removedId));
+      setSelectedId(null);
+      setEditing(false);
+      setBuffer(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al eliminar');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const upd = (patch: Partial<IncBuffer>) => buffer && setBuffer({ ...buffer, ...patch });
+
+  return (
+    <div className="flex flex-col md:flex-row gap-4">
+      {/* Lista */}
+      <div
+        className={`${
+          selectedId ? 'hidden md:block' : 'block'
+        } w-full md:w-80 md:shrink-0 md:border-r md:border-[var(--border)] md:pr-4`}
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar incidencia…"
+            className={`${inputCls} flex-1`}
+            aria-label="Buscar incidencia"
+          />
+          <button
+            type="button"
+            onClick={createNew}
+            disabled={busy}
+            className="shrink-0 text-sm px-2.5 py-1 rounded text-[var(--accent)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
+          >
+            + Nueva
+          </button>
+        </div>
+
+        {filtered.length === 0 ? (
+          <p className="text-sm text-[var(--muted)] px-2 py-4">
+            {incidencias.length === 0
+              ? 'Sin incidencias aún. Crea la primera.'
+              : 'Sin resultados.'}
+          </p>
+        ) : (
+          <div className="flex flex-col">
+            {filtered.map((x) => (
+              <button
+                key={x.id}
+                type="button"
+                onClick={() => select(x.id)}
+                className={`text-left px-2 py-1.5 rounded text-sm hover:bg-[var(--surface-hover)] ${
+                  x.id === selectedId ? 'bg-[var(--surface-hover)] font-medium' : ''
+                }`}
+              >
+                <span className="mono text-[11px] text-[var(--muted)] mr-2">{x.codigo}</span>
+                <span>{x.titulo}</span>
+                <span className="block text-[11px] text-[var(--muted)]">
+                  {x.tipo}
+                  {x.sistema ? ` · ${x.sistema}` : ''}
+                  {x.ans != null ? ` · ANS ${x.ans}d` : ''}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Detalle / editor */}
+      <div className={`${selectedId ? 'block' : 'hidden md:block'} flex-1 min-w-0`}>
+        {!selected ? (
+          <div className="h-full flex items-center justify-center py-16">
+            <p className="text-sm text-[var(--muted)]">Selecciona o crea una incidencia</p>
+          </div>
+        ) : (
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedId(null);
+                setEditing(false);
+                setBuffer(null);
+              }}
+              className="md:hidden text-sm text-[var(--muted)] hover:text-[var(--text)] mb-3"
+            >
+              ← volver
+            </button>
+
+            {error && <div className="mb-3 text-sm text-[var(--danger)]">{error}</div>}
+
+            {editing && buffer ? (
+              /* ---------- EDIT ---------- */
+              <div className="flex flex-col gap-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={save}
+                    disabled={busy}
+                    className="text-sm px-3 py-1.5 rounded bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-50"
+                  >
+                    {busy ? 'Guardando…' : 'Guardar'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditing(false);
+                      setBuffer(null);
+                    }}
+                    disabled={busy}
+                    className="text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--muted)] disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={remove}
+                    disabled={busy}
+                    className="text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--danger)] disabled:opacity-50 ml-auto"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className={labelCls}>Código</label>
+                    <input
+                      type="text"
+                      value={buffer.codigo}
+                      onChange={(e) => upd({ codigo: e.target.value })}
+                      className={`${inputCls} mono`}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Tipo</label>
+                    <select
+                      value={buffer.tipo}
+                      onChange={(e) => upd({ tipo: e.target.value as 'INC' | 'RITM' })}
+                      className={inputCls}
+                      aria-label="Tipo de incidencia"
+                    >
+                      <option value="INC">INC</option>
+                      <option value="RITM">RITM</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>ANS (días)</label>
+                    <input
+                      type="number"
+                      value={buffer.ans}
+                      onChange={(e) => upd({ ans: e.target.value })}
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Solicitud (título)</label>
+                  <input
+                    type="text"
+                    value={buffer.titulo}
+                    onChange={(e) => upd({ titulo: e.target.value })}
+                    className={`${inputCls} text-lg font-semibold`}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelCls}>Sistema destino</label>
+                    <input
+                      type="text"
+                      value={buffer.sistema}
+                      onChange={(e) => upd({ sistema: e.target.value })}
+                      placeholder="Work Beat · OPERA · eCO · Salesforce…"
+                      className={inputCls}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelCls}>¿Lleva adjunto?</label>
+                    <select
+                      value={buffer.adjunto}
+                      onChange={(e) => upd({ adjunto: e.target.value as 'si' | 'no' })}
+                      className={inputCls}
+                      aria-label="Lleva adjunto"
+                    >
+                      <option value="no">No</option>
+                      <option value="si">Sí</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className={labelCls}>Descripción (texto a enviar)</label>
+                  <textarea
+                    value={buffer.descripcion}
+                    onChange={(e) => upd({ descripcion: e.target.value })}
+                    rows={5}
+                    className={`${inputCls} resize-y`}
+                  />
+                </div>
+
+                <div>
+                  <label className={labelCls}>Documentación (markdown)</label>
+                  <MarkdownImageTextarea
+                    value={buffer.documentacion}
+                    onChange={(v) => upd({ documentacion: v })}
+                    rows={3}
+                    className={textareaCls}
+                  />
+                </div>
+              </div>
+            ) : (
+              /* ---------- VIEW ---------- */
+              <div className="flex flex-col gap-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="mono text-[11px] text-[var(--muted)] font-medium mb-1">
+                      {selected.codigo}
+                    </div>
+                    <h2 className="text-2xl font-bold tracking-tight">{selected.titulo}</h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBuffer(incToBuffer(selected));
+                      setEditing(true);
+                      setError(null);
+                    }}
+                    className="shrink-0 text-sm px-3 py-1.5 rounded hover:bg-[var(--surface-hover)] text-[var(--accent)]"
+                  >
+                    Editar
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <Meta label="Tipo" value={selected.tipo} />
+                  <Meta label="Sistema" value={selected.sistema} />
+                  <Meta label="ANS" value={selected.ans != null ? `${selected.ans} días` : null} />
+                  <Meta label="Adjunto" value={selected.adjunto === 'si' ? 'Sí' : 'No'} />
+                </div>
+
+                <div>
+                  <SubLabel>Descripción</SubLabel>
+                  {selected.descripcion ? (
+                    <div className="flex flex-col gap-2">
+                      <pre className="text-sm whitespace-pre-wrap bg-[var(--surface)] border border-[var(--border)] rounded p-3 text-[var(--text)]">
+                        {selected.descripcion}
+                      </pre>
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard?.writeText(selected.descripcion ?? '')}
+                        className="self-start text-xs px-2.5 py-1 rounded border border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                      >
+                        Copiar texto
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-[var(--muted)]">—</p>
+                  )}
+                </div>
+
+                <div>
+                  <SubLabel>Documentación</SubLabel>
+                  <Markdown value={selected.documentacion} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== */
 /* Importación de Excel (compartido por Conocidas y Pendientes)       */
 /* ================================================================== */
 
@@ -1520,6 +2402,7 @@ const INCIDENCIA_LABEL: Record<string, string> = {
 function ConocidasTab({
   entries,
   subprocesos,
+  incidencias,
   casos,
   setCasos,
   onImported,
@@ -1527,6 +2410,7 @@ function ConocidasTab({
 }: {
   entries: KoEntry[];
   subprocesos: KoSubproceso[];
+  incidencias: KoIncidencia[];
   casos: KoImportCaso[];
   setCasos: SetCasos;
   onImported: () => void;
@@ -1704,6 +2588,7 @@ function ConocidasTab({
                   ko={g.ko}
                   casos={g.casos}
                   subprocesos={subprocesos}
+                  incidencias={incidencias}
                   busy={busyId != null}
                   onResolver={(c) => setEstado(c, 'resuelto')}
                   onReabrir={(c) => setEstado(c, 'pendiente')}
@@ -1728,6 +2613,7 @@ function ConocidasTab({
               caso={c}
               ko={ko}
               subprocesos={subprocesos}
+              incidencias={incidencias}
               onClose={() => setCasoModalId(null)}
               onSaved={(u) => setCasos((prev) => prev.map((x) => (x.id === u.id ? u : x)))}
               onOpenSubproceso={onOpenSubproceso}
@@ -1743,6 +2629,7 @@ function GrupoConocidas({
   ko,
   casos,
   subprocesos,
+  incidencias,
   busy,
   onResolver,
   onReabrir,
@@ -1753,6 +2640,7 @@ function GrupoConocidas({
   ko: KoEntry | null;
   casos: KoImportCaso[];
   subprocesos: KoSubproceso[];
+  incidencias: KoIncidencia[];
   busy: boolean;
   onResolver: (c: KoImportCaso) => void;
   onReabrir: (c: KoImportCaso) => void;
@@ -1762,6 +2650,7 @@ function GrupoConocidas({
 }) {
   const [abierto, setAbierto] = useState(false);
   const subs = ko?.subprocesos ?? [];
+  const incs = ko?.incidencias ?? [];
   const pendientes = casos.filter((c) => c.estado === 'pendiente');
 
   return (
@@ -1808,6 +2697,12 @@ function GrupoConocidas({
                   );
                 })}
               </div>
+            </div>
+          )}
+          {incs.length > 0 && (
+            <div>
+              <SubLabel>Incidencias a radicar</SubLabel>
+              <IncidenciasInline refs={incs} incidencias={incidencias} />
             </div>
           )}
           {ko.resolucion && (
@@ -1931,6 +2826,7 @@ function CasoModal({
   caso,
   ko,
   subprocesos,
+  incidencias,
   onClose,
   onSaved,
   onOpenSubproceso,
@@ -1938,6 +2834,7 @@ function CasoModal({
   caso: KoImportCaso;
   ko: KoEntry | null;
   subprocesos: KoSubproceso[];
+  incidencias: KoIncidencia[];
   onClose: () => void;
   onSaved: (c: KoImportCaso) => void;
   onOpenSubproceso: (id: string) => void;
@@ -1951,6 +2848,7 @@ function CasoModal({
   const [error, setError] = useState<string | null>(null);
 
   const subs = ko?.subprocesos ?? [];
+  const incs = ko?.incidencias ?? [];
   const historial = [...(caso.historial ?? [])].reverse(); // más reciente primero
 
   async function guardar() {
@@ -2035,6 +2933,58 @@ function CasoModal({
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {/* Incidencias a radicar para este KO (con texto listo para copiar) */}
+        {incs.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <SubLabel>Incidencias a radicar</SubLabel>
+            {incs.map((ref) => {
+              const inc = resolveIncidencia(ref, incidencias);
+              if (!inc) {
+                return (
+                  <div key={ref} className="text-sm text-[var(--muted)]">
+                    {ref} (no encontrada en el catálogo)
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={ref}
+                  className="rounded-md border border-[var(--border)] bg-[var(--surface)] p-3 flex flex-col gap-2"
+                >
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="mono text-[11px] text-[var(--muted)]">{inc.codigo}</span>
+                    <span className="font-medium text-[var(--text)]">{inc.titulo}</span>
+                    <span className="text-[10px] uppercase text-[var(--muted)]">{inc.tipo}</span>
+                    {inc.sistema && (
+                      <span className="text-xs text-[var(--muted)]">· {inc.sistema}</span>
+                    )}
+                    {inc.ans != null && (
+                      <span className="text-xs text-[var(--muted)]">· ANS {inc.ans}d</span>
+                    )}
+                    <span className="text-xs text-[var(--muted)]">
+                      · {inc.adjunto === 'si' ? 'con adjunto' : 'sin adjunto'}
+                    </span>
+                  </div>
+                  {inc.descripcion && (
+                    <>
+                      <pre className="text-xs whitespace-pre-wrap bg-[var(--bg)] border border-[var(--border)] rounded p-2 text-[var(--text)]">
+                        {inc.descripcion}
+                      </pre>
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard?.writeText(inc.descripcion ?? '')}
+                        className="self-start text-xs px-2.5 py-1 rounded border border-[var(--border)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                      >
+                        Copiar texto
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -2182,6 +3132,7 @@ function casoToBuffer(caso: KoImportCaso): EntryBuffer {
     sistema_solucion: '',
     responsable: '',
     subprocesos: '',
+    incidencias: '',
     resolucion: '',
     documentacion: '',
     flujograma_url: '',
@@ -2205,6 +3156,10 @@ function bufferToKoData(b: EntryBuffer) {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    incidencias: b.incidencias
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
     resolucion: b.resolucion || null,
     documentacion: b.documentacion || null,
     flujograma_url: b.flujograma_url || null,
@@ -2225,12 +3180,16 @@ type GrupoPendiente = {
  */
 function PendientesTab({
   entries,
+  subprocesos,
+  incidencias,
   casos,
   setCasos,
   onImported,
   onChanged,
 }: {
   entries: KoEntry[];
+  subprocesos: KoSubproceso[];
+  incidencias: KoIncidencia[];
   casos: KoImportCaso[];
   setCasos: SetCasos;
   onImported: () => void;
@@ -2496,6 +3455,8 @@ function PendientesTab({
                     setBuffer(null);
                   }}
                   onRemove={descartar}
+                  subprocesos={subprocesos}
+                  incidencias={incidencias}
                 />
               </div>
             ) : (

@@ -232,6 +232,7 @@ export const ko_entries = pgTable(
     sistema_solucion: text(),             // dónde se resuelve
     responsable: text(),
     subprocesos: text().array().default(sql`'{}'`), // ['SP-001','SP-003']
+    incidencias: text().array().default(sql`'{}'`),  // ['INC-001'] — incidencias específicas a radicar
     resolucion: text(),                   // pasos (markdown)
     documentacion: text(),                // markdown (links a guías)
     flujograma_url: text(),               // PNG subido a hosting
@@ -245,10 +246,29 @@ export const ko_entries = pgTable(
   ]
 );
 
+// Catálogo de incidencias: cada fila es una plantilla de incidencia que se radica
+// (especializa el subproceso "Radicar Incidencia"). Un KO referencia las suyas en
+// `ko_entries.incidencias` (por código).
+export const ko_incidencias = pgTable('ko_incidencias', {
+  id: uuid().primaryKey().default(sql`gen_random_uuid()`),
+  codigo: text().notNull().unique(),               // INC-001
+  titulo: text().notNull(),                         // "Solicitud" (p. ej. "Modificar Medidor en Beats")
+  tipo: text({ enum: ['INC', 'RITM'] }).notNull().default('INC'),
+  descripcion: text(),                              // texto/plantilla a enviar
+  adjunto: text({ enum: ['si', 'no'] }).notNull().default('no'),
+  sistema: text(),                                  // sistema destino (Work Beat, OPERA, eCO…)
+  ans: integer(),                                   // ANS en días
+  documentacion: text(),                            // markdown opcional
+  created_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  updated_at: timestamp({ withTimezone: true }).notNull().defaultNow(),
+});
+
 export type KoEntry = typeof ko_entries.$inferSelect;
 export type NewKoEntry = typeof ko_entries.$inferInsert;
 export type KoSubproceso = typeof ko_subprocesos.$inferSelect;
 export type NewKoSubproceso = typeof ko_subprocesos.$inferInsert;
+export type KoIncidencia = typeof ko_incidencias.$inferSelect;
+export type NewKoIncidencia = typeof ko_incidencias.$inferInsert;
 
 // Importación de Excel de "KO altas": cada subida es un lote y cada fila un caso.
 // Los casos se cruzan por código contra `ko_entries` y se gestionan como worklist.
