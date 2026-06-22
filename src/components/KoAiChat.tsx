@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { KoEntry } from '@/db';
+import type { KoEntry, KoImportCaso } from '@/db';
 import GuitoWalker from './GuitoWalker';
 import type { KoAiResult, KoBulkEdit, KoDraft } from '@/lib/ko-ai';
 
@@ -85,6 +85,8 @@ const PLACEHOLDER =
 export default function KoAiChat({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
   const [entries, setEntries] = useState<KoEntry[]>([]);
+  // Cuentas pendientes (errores sin KO): para vincularlas al crear el KO desde el chat.
+  const [pendientes, setPendientes] = useState<KoImportCaso[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -171,12 +173,20 @@ export default function KoAiChat({ open, onClose }: { open: boolean; onClose: ()
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/ko');
-        if (!res.ok) return;
-        const data = (await res.json()) as KoEntry[];
-        if (!cancelled && Array.isArray(data)) setEntries(data);
+        const [resE, resP] = await Promise.all([
+          fetch('/api/ko'),
+          fetch('/api/ko/casos?tipo=desconocida'),
+        ]);
+        if (resE.ok) {
+          const data = (await resE.json()) as KoEntry[];
+          if (!cancelled && Array.isArray(data)) setEntries(data);
+        }
+        if (resP.ok) {
+          const data = (await resP.json()) as KoImportCaso[];
+          if (!cancelled && Array.isArray(data)) setPendientes(data);
+        }
       } catch {
-        /* silencioso: el chat sigue usable aunque falle el fetch de targets */
+        /* silencioso: el chat sigue usable aunque falle el fetch de contexto */
       }
     })();
     return () => {
@@ -267,6 +277,55 @@ export default function KoAiChat({ open, onClose }: { open: boolean; onClose: ()
     if (faltantes.length === 0) return body;
     const embeds = faltantes.map((u, i) => `![captura ${i + 1}](${u})`).join('\n');
     return { ...body, documentacion: base ? `${base}\n\n${embeds}` : embeds };
+  }
+
+  // Cuentas pendientes cuyo "Error normalizado" coincide con el error que la IA dice resolver.
+  function pendingMatch(errorTexto: string | null | undefined): KoImportCaso[] {
+    if (!errorTexto) return [];
+    const t = errorTexto.trim().toLowerCase();
+    if (!t) return [];
+    return pendientes.filter((c) => (c.error_texto ?? '').trim().toLowerCase() === t);
+  }
+
+  /**
+   * Confirma un `propose_create`. Si la IA marcó un `pendienteError` que cruza con
+   * cuentas pendientes, crea el KO y las vincula de una vez (promover); si no,
+   * crea el KO normal. Incrusta las capturas de la conversación en documentación.
+   */
+  async function confirmCreate(draft: KoDraft, pendienteError?: string | null) {
+    const matches = pendingMatch(pendienteError);
+    const body = withConversationImages(draftToBody(draft));
+    setLoading(true);
+    setError(null);
+    try {
+      const res =
+        matches.length > 0
+          ? await fetch('/api/ko/casos/promover', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                mode: 'create',
+                koData: body,
+                caso_ids: matches.map((c) => c.id),
+              }),
+            })
+          : await fetch('/api/ko', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error((data as { error?: string }).error ?? `Falló (${res.status})`);
+      }
+      router.refresh();
+      resetConversation();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error al crear');
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function createFrom(body: { documentacion?: string | null } & Record<string, unknown>) {
@@ -441,15 +500,24 @@ export default function KoAiChat({ open, onClose }: { open: boolean; onClose: ()
         </div>
 
         {proposal && proposal.action === 'propose_create' && (
+          (() => {
+            const vinculadas = pendingMatch(proposal.pendienteError).length;
+            return (
           <ProposalBox>
             <CreatePreview draft={proposal.draft} />
+            {vinculadas > 0 && (
+              <p className="text-xs text-[var(--accent)]">
+                Se vincularán {vinculadas} cuenta{vinculadas === 1 ? '' : 's'} pendiente
+                {vinculadas === 1 ? '' : 's'} a este KO.
+              </p>
+            )}
             <div className="flex gap-2 pt-2">
               <button
-                onClick={() => createFrom(draftToBody(proposal.draft))}
+                onClick={() => confirmCreate(proposal.draft, proposal.pendienteError)}
                 disabled={loading}
                 className="bg-[var(--accent)] text-white rounded px-4 py-1.5 text-sm hover:opacity-90 disabled:opacity-50"
               >
-                Crear KO
+                {vinculadas > 0 ? 'Crear KO y vincular' : 'Crear KO'}
               </button>
               <button
                 onClick={() => setProposal(null)}
@@ -460,6 +528,8 @@ export default function KoAiChat({ open, onClose }: { open: boolean; onClose: ()
               </button>
             </div>
           </ProposalBox>
+            );
+          })()
         )}
 
         {proposal && proposal.action === 'propose_edit' && (

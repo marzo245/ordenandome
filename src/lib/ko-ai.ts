@@ -40,7 +40,13 @@ export interface KoBulkEdit {
 export type KoAiResult =
   | { action: 'clarify'; message: string }
   | { action: 'answer'; message: string }
-  | { action: 'propose_create'; message: string; draft: KoDraft }
+  | {
+      action: 'propose_create';
+      message: string;
+      draft: KoDraft;
+      /** Texto EXACTO del error pendiente que se está resolviendo (para vincular sus cuentas). */
+      pendienteError?: string | null;
+    }
   | {
       action: 'propose_edit';
       message: string;
@@ -61,7 +67,7 @@ const VALID_SISTEMA_SOLUCION = [
   'Bypass',
 ];
 
-const SYSTEM = (catalogo: string) => `Eres un asistente experto en la base de conocimiento "KO" del flujo de creación de cuentas de Enel. Hablas en español, directo y breve.
+const SYSTEM = (catalogo: string, pendientes: string) => `Eres un asistente experto en la base de conocimiento "KO" del flujo de creación de cuentas de Enel. Hablas en español, directo y breve.
 
 ## ¿Qué es un KO?
 Un KO es un error que ATASCA una cuenta en el flujo de creación (flujos 9 a 13). El usuario suele pegar un mensaje de error crudo del sistema (por ejemplo el contenido de ECO_Notes__c) o describir un problema. Tu trabajo es ayudarle a CREAR un KO nuevo o EDITAR uno existente, con los campos normalizados.
@@ -69,6 +75,10 @@ Un KO es un error que ATASCA una cuenta en el flujo de creación (flujos 9 a 13)
 ## Catálogo actual de KOs
 Cada línea: id=<id> · <codigo|sin código> · F<flujo> · <sistema>/<clasificacion> · "<error>" · causa: <causa_raiz> · resuelve: <sistema_solucion> · subprocs: <subprocesos>
 ${catalogo}
+
+## Cuentas pendientes (errores SIN KO todavía)
+Son "Errores normalizados" de cuentas atascadas que aún NO tienen un KO en el catálogo. Cada línea: "<error>" · <n> cuenta(s).
+${pendientes}
 
 ## Campos de un KO
 - codigo: string|null. Ej "SAP-005". null si aún no está formalizado.
@@ -104,6 +114,7 @@ ${catalogo}
    - Usa el id EXACTO tal cual aparece en el catálogo (campo id=...). No inventes ids.
    - Incluye SOLO los KOs que cumplen el criterio del usuario y SOLO los campos que pidió cambiar. No añadas KOs ni campos no solicitados.
 5. Si falta información para decidir entre crear/editar/responder o para un campo crítico → action "clarify" con UNA sola pregunta concreta.
+6. Si el usuario te da la RESOLUCIÓN/causa/documentación de uno de los errores de la lista "Cuentas pendientes" (ej. "para el error X tengo lo siguiente…") → action "propose_create" con el draft completo y, ADEMÁS, copia en el campo "pendienteError" el texto EXACTO de ese error tal como aparece en la lista de pendientes. Así, al confirmar, se creará el KO y se vincularán automáticamente sus cuentas pendientes. Si el error que resuelve no está en esa lista, NO pongas "pendienteError".
 
 ## Restricciones de valores
 - clasificacion DEBE ser uno de [${VALID_CLASIFICACION.join(' | ')}].
@@ -119,6 +130,8 @@ Ejemplos (uno por cada action):
 {"action":"answer","message":"Hay **3 KOs de SAP** en el catálogo:\n\n- **SAP-005** — Cuenta bloqueada por validación de NIF (flujo 11)\n- **SAP-007** — Centro de coste no sincronizado (flujo 11)\n- **SAP-009** — Contrato sin fecha de inicio (flujo 12)"}
 
 {"action":"propose_create","message":"Es un error nuevo de SAP en el flujo 11. Propongo este KO.","draft":{"codigo":null,"error":"Cuenta sin centro asignado al crear el contrato","eco_notes":"ERROR: account has no cost center assigned [code 5001]","sistema":"SAP","flujo":11,"clasificacion":"Validación","causa_raiz":"El centro de coste no se sincronizó desde Salesforce","sistema_solucion":"SAP","responsable":null,"subprocesos":[],"resolucion":null,"documentacion":null}}
+
+{"action":"propose_create","message":"Documento el KO del error pendiente «Error creando el Medidor» con la resolución que me das y vinculo sus cuentas.","pendienteError":"Error creando el Medidor","draft":{"codigo":null,"error":"Error creando el Medidor","eco_notes":null,"sistema":"Opera","flujo":12,"clasificacion":"Sistemas","causa_raiz":"El medidor no se sincroniza desde Opera","sistema_solucion":"Opera","responsable":null,"subprocesos":["SP-003"],"resolucion":"1. Relanzar la novedad...","documentacion":null}}
 
 {"action":"propose_edit","message":"Actualizo la causa raíz y el sistema de solución del KO SAP-005.","targetCodigo":"SAP-005","targetError":"Cuenta bloqueada por validación de NIF","patch":{"causa_raiz":"El NIF no pasa la validación de Hacienda","sistema_solucion":"Bypass"}}
 
@@ -144,6 +157,20 @@ function summarizeCatalog(entries: KoEntry[]): string {
           : '—';
       return `- id=${e.id} · ${codigo} · F${flujo} · ${sistema}/${clasif} · "${error}" · causa: ${causa} · resuelve: ${sol} · subprocs: ${subs}`;
     })
+    .join('\n');
+}
+
+/** Grupo de cuentas pendientes (error sin KO) que se pasa como contexto al asistente. */
+export interface KoPendienteGroup {
+  error: string;
+  count: number;
+}
+
+/** Resume los errores pendientes (sin KO) en líneas compactas para el system prompt. */
+function summarizePendientes(pendientes: KoPendienteGroup[]): string {
+  if (pendientes.length === 0) return '(no hay cuentas pendientes)';
+  return pendientes
+    .map((p) => `- "${p.error}" · ${p.count} cuenta${p.count === 1 ? '' : 's'}`)
     .join('\n');
 }
 
@@ -221,12 +248,13 @@ function looksLikeQuestion(messages: { role: string; content: string }[]): boole
  */
 export async function koAssistant(
   messages: { role: 'user' | 'assistant'; content: string; images?: string[] }[],
-  entries: KoEntry[]
+  entries: KoEntry[],
+  pendientes: KoPendienteGroup[] = []
 ): Promise<KoAiResult> {
   // Si hay capturas adjuntas, usamos Gemini (multimodal); Groq llama-3.3 es solo texto.
   const hasImages = messages.some((m) => m.images && m.images.length > 0);
   const result = await runAgent({
-    system: SYSTEM(summarizeCatalog(entries)),
+    system: SYSTEM(summarizeCatalog(entries), summarizePendientes(pendientes)),
     messages,
     temperature: 0.3,
     responseFormat: 'json_object',
@@ -293,7 +321,11 @@ export async function koAssistant(
   if (action === 'propose_create') {
     // Soporta tanto {draft:{...}} como los campos del draft al nivel raíz.
     const draftSource = (parsed.draft as Partial<KoDraft>) ?? (parsed as Partial<KoDraft>);
-    return { action, message, draft: normalizeDraft(draftSource) };
+    const pendienteError =
+      typeof parsed.pendienteError === 'string' && parsed.pendienteError.trim()
+        ? parsed.pendienteError
+        : null;
+    return { action, message, draft: normalizeDraft(draftSource), pendienteError };
   }
 
   if (action === 'propose_edit') {
