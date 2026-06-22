@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { KoEntry, KoSubproceso, KoImportCaso, KoImportLote } from '@/db';
 import MarkdownImageTextarea from './MarkdownImageTextarea';
+import KoResumen from './KoResumen';
 
 /* ------------------------------------------------------------------ */
 /* Markdown rendering (shared)                                         */
@@ -122,7 +123,7 @@ function resolveSubproceso(
  * el catálogo de KOs y los subprocesos. Permite ver/crear/editar/borrar cada
  * entrada contra `/api/ko` y `/api/ko/subprocesos`.
  */
-type Tab = 'catalogo' | 'subprocesos' | 'conocidas' | 'pendientes';
+type Tab = 'resumen' | 'catalogo' | 'subprocesos' | 'conocidas' | 'pendientes';
 
 export default function KoManager({
   initialEntries,
@@ -134,7 +135,7 @@ export default function KoManager({
   initialCasos: KoImportCaso[];
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>('catalogo');
+  const [tab, setTab] = useState<Tab>('resumen');
   // Subproceso a abrir al navegar desde un caso del catálogo (deep-link entre tabs).
   const [openSubprocesoId, setOpenSubprocesoId] = useState<string | null>(null);
 
@@ -157,6 +158,9 @@ export default function KoManager({
     <div className="flex flex-col gap-5">
       {/* Tabs (Notion-style underline) */}
       <div className="flex items-center gap-5 border-b border-[var(--border)] overflow-x-auto">
+        <TabButton active={tab === 'resumen'} onClick={() => setTab('resumen')}>
+          Resumen
+        </TabButton>
         <TabButton active={tab === 'catalogo'} onClick={() => setTab('catalogo')}>
           Catálogo
         </TabButton>
@@ -179,6 +183,13 @@ export default function KoManager({
         </TabButton>
       </div>
 
+      {tab === 'resumen' && (
+        <KoResumen
+          entries={initialEntries}
+          subprocesos={initialSubprocesos}
+          casos={casos}
+        />
+      )}
       {tab === 'catalogo' && (
         <CatalogoTab
           initial={initialEntries}
